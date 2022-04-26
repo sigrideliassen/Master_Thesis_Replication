@@ -1,0 +1,48 @@
+library(data.table)
+library(zoo)
+library(dplyr)
+
+# Import CRSP data 
+library(readxl)
+NYSE = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compustat/NYSE_data.xlsx"))
+AMEX = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compustat/AMEX_data.xlsx"))
+NASDAQ = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compustat/NASDAQ_data.xlsx"))
+
+# Merge data
+NYSE_AMEX = merge.data.table(NYSE,AMEX)
+NYSE_AMEX = merge(NYSE, AMEX, all = TRUE)
+data = merge.data.table(NYSE_AMEX,NASDAQ)
+data = merge(NYSE_AMEX, NASDAQ, all = TRUE)
+
+# Cleaning 
+colnames(data) = c("DATE", "SHRCD", "EXCHCD", "TICKER", "DLRET", "PRC", "RET", "SHROUT", "RET_NO_DIV")
+data$PRC = abs(data$PRC) # VI MÅ BLI ENIGE OM VI SKAL TA ABS ELLR IKKE!! Tell antall negative priser 
+
+# Replace NA returns with delisted returns 
+index = which(!is.na(data$DLRET))
+D_R = data$DLRET[index]
+R = data$RET
+R[R = index] <- D_R
+data$RET = R 
+
+# Replace NA prices calculated from delisted returns 
+index = which(!is.na(data$DLRET))
+P = data$PRC
+P[P=index] <- P[index - 1]*(1 + data$RET[index])
+data$PRC = P 
+
+# NA prices and returns without delisiting returns - DELETING ROWS
+index2 = which(is.na(data$RET))
+data = data[-which(is.na(data$PRC))]
+data = data[-which(is.na(data$RET))]
+
+# FINDING MARKET CAP 
+data = data[,MKTCAP:=abs(PRC)*SHROUT]
+
+# Sort by TICKER 
+setkey(data,TICKER,DATE)
+vec=c('TICKER','DATE')
+setorderv(data,vec)
+
+# Create lagged mkt cap of each stock at each date
+data$MKTCAP_LAG = data[,MKTCAP.LAG:=shift(MKTCAP)]
