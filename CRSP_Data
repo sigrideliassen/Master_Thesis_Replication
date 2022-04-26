@@ -36,13 +36,22 @@ index2 = which(is.na(data$RET))
 data = data[-which(is.na(data$PRC))]
 data = data[-which(is.na(data$RET))]
 
-# FINDING MARKET CAP 
-data = data[,MKTCAP:=abs(PRC)*SHROUT]
-
 # Sort by TICKER 
 setkey(data,TICKER,DATE)
 vec=c('TICKER','DATE')
 setorderv(data,vec)
 
+# FINDING MARKET CAP 
+data$MKTCAP = data[,MKTCAP:=abs(PRC)*SHROUT]
+
 # Create lagged mkt cap of each stock at each date
-data$MKTCAP_LAG = data[,MKTCAP.LAG:=shift(MKTCAP)]
+data$MKTCAP_LAG = data[,MKTCAP_LAG:=shift(MKTCAP), by=TICKER]
+
+# Remove NA in MKTCAP_LAG
+data = data[,RET_NO_DIV:=NULL]
+data = data[,DLRET:=NULL]
+data = na.omit(data)
+
+# Create variable for SMB ranking. We define lagged market cap as a ranking variable
+MEDIAN = data[, `:=`(decile_month, cut(data$MKTCAP_LAG, breaks = quantile(data$MKTCAP_LAG[which(data$EXCHCD==1)],probs = c(0,0.5,1), na.rm = TRUE), include.lowest = TRUE, labels = FALSE)),by = key]
+
