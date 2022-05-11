@@ -80,5 +80,20 @@ data = data[,decile_month_help:=NULL]
 
 smb_deciles=copy(data)
 
+# Aggregate the return of firms that have several PERMNOs 
+# {r,eval=TRUE} - HVA ER DETTE OG HVA GJØRE DEN? 
+
+# Aggreagate return of firm that has several securities traded
+data[,TICKER_weight:=data$MKTCAP_LAG/sum(data$MKTCAP_LAG),by=.(TICKER,key)]
+data[,RET:=sum(TICKER_weight*RET),by=.(TICKER,key)]
+data[,MKTCAP_LAG:=sum(MKTCAP_LAG),by=.(TICKER,key)]
+data=unique(data[,.(TICKER,DATE,EXCHCD,MKTCAP,MKTCAP_LAG,RET,key,Year,Month)],by=c("TICKER","key"))
+setorder(data,TICKER,key) 
+
+# Bruke denne? 
+# data$TICKER_weight = data$MKTCAP_LAG/sum(data$MKTCAP_LAG)
+
+# Linking 
+
 
 
