@@ -5,6 +5,7 @@ library(zoo)
 library(dplyr)
   
 # Import CRSP data 
+# Jeg trykker bare på "Import data" i stedet for å kode innhentingen (også lime inn i koden så du har den liggende til neste gang du kjører)
 library(readxl)
 NYSE = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compustat/NYSE_data.xlsx"))
 AMEX = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compustat/AMEX_data.xlsx"))
@@ -18,10 +19,13 @@ data = merge.data.table(NYSE_AMEX,NASDAQ)
 data = merge(NYSE_AMEX, NASDAQ, all = TRUE) # Dette er endelig datasett jeg jobber med gjennom resten av koden 
 
 # Cleaning 
-colnames(data) = c("DATE", "SHRCD", "EXCHCD", "TICKER", "DLRET", "PRC", "RET", "SHROUT", "RET_NO_DIV")
-data$PRC = abs(data$PRC) # VI MÅ BLI ENIGE OM VI SKAL TA ABS ELLR IKKE!! Tell antall negative priser 
+colnames(data) = c("DATE", "SHRCD", "EXCHCD", "TICKER", "DLRET", "PRC", "RET", "SHROUT", "RET_NO_DIV") " Her har jeg endret navn på variablene så det er omtrent konsistent med hans koder 
+data$PRC = abs(data$PRC) # VI MÅ BLI ENIGE OM VI SKAL TA ABS ELLR IKKE!! Tenker vi bare kjører på med absolute prices jeg 
 
 # Replace NA returns with delisted returns 
+# I datasettet fra CRSP så mangler selskapene returns den måneden de blir delisted (tatt av børs) 
+# Men de har en delisted return, så jeg erstatter tomme celler med den delisted returnen 
+# Du har nok kanskje ikke delistede returns, så du kan for eksempel heller endre til at den returnen er lik måneden før (for det er nok ikke mange tilfelller)  
 index = which(!is.na(data$DLRET))
 D_R = data$DLRET[index]
 R = data$RET
@@ -29,27 +33,34 @@ R[R = index] <- D_R
 data$RET = R 
 
 # Replace NA prices calculated from delisted returns 
+# Her er det samme som over, men her er det prisene vi må endre 
+# Vi kan se nærmere på hvordan denne bør gjøres når du kommer så langt 
 index = which(!is.na(data$DLRET))
 P = data$PRC
 P[P=index] <- P[index - 1]*(1 + data$RET[index])
 data$PRC = P 
 
 # NA prices and returns without delisiting returns - DELETING ROWS
+# Her sletter vi alle de som fortsatt har tomme celler etter å ha erstattet med delisted returns, og fjerner bare fra datasettet 
 index2 = which(is.na(data$RET))
 data = data[-which(is.na(data$PRC))]
 data = data[-which(is.na(data$RET))]
 
 # Sort by TICKER 
+# Dette vil jeg tro ikke er relevant for deg siden oppsettet er noe annet, men det kan vi også se nærmere på når du kommer hit 
 setkey(data,TICKER,DATE)
 vec=c('TICKER','DATE')
 setorderv(data,vec)
 
 # FINDING MARKET CAP 
+# Absolute price * shares outstanding 
 data$MKTCAP = data[,MKTCAP:=abs(PRC)*SHROUT]
 
 # Create lagged mkt cap of each stock at each date
+# Lagger med en måned - kan hende det vil dukke opp problemer med at datasettet ditt ikke er sortert på samme måte, men det finner vi ut av 
 data$MKTCAP_LAG = data[,MKTCAP_LAG:=shift(MKTCAP), by=TICKER]
 
+# Det her har jeg ikke helt skjønt hvorfor vi gjør, men det er i forbindelse med NYSE sorteringen virker det som 
 data[,Year:=year(DATE)]
 data[,Month:=month(DATE)]
 data[,key:=paste(Year,Month)]
