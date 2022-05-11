@@ -22,6 +22,12 @@ data = merge(NYSE_AMEX, NASDAQ, all = TRUE) # Dette er endelig datasett jeg jobb
 colnames(data) = c("DATE", "SHRCD", "EXCHCD", "TICKER", "DLRET", "PRC", "RET", "SHROUT", "RET_NO_DIV") " Her har jeg endret navn på variablene så det er omtrent konsistent med hans koder 
 data$PRC = abs(data$PRC) # VI MÅ BLI ENIGE OM VI SKAL TA ABS ELLR IKKE!! Tenker vi bare kjører på med absolute prices jeg 
 
+# Sort by TICKER 
+# Dette vil jeg tro ikke er relevant for deg siden oppsettet er noe annet, men det kan vi også se nærmere på når du kommer hit 
+setkey(data,TICKER,DATE)
+vec=c('TICKER','DATE')
+setorderv(data,vec)
+
 # Replace NA returns with delisted returns 
 # I datasettet fra CRSP så mangler selskapene returns den måneden de blir delisted (tatt av børs) 
 # Men de har en delisted return, så jeg erstatter tomme celler med den delisted returnen 
@@ -45,12 +51,6 @@ data$PRC = P
 index2 = which(is.na(data$RET))
 data = data[-which(is.na(data$PRC))]
 data = data[-which(is.na(data$RET))]
-
-# Sort by TICKER 
-# Dette vil jeg tro ikke er relevant for deg siden oppsettet er noe annet, men det kan vi også se nærmere på når du kommer hit 
-setkey(data,TICKER,DATE)
-vec=c('TICKER','DATE')
-setorderv(data,vec)
 
 # FINDING MARKET CAP 
 # Absolute price * shares outstanding 
