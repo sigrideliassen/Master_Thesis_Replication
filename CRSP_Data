@@ -1,7 +1,9 @@
+# Dette er noen pakker du må sørge for at du har i R: 
+# Du kan trykke på "Packages" og huke av for "zoo" og "dply" 
 library(data.table)
 library(zoo)
 library(dplyr)
-
+  
 # Import CRSP data 
 library(readxl)
 NYSE = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compustat/NYSE_data.xlsx"))
@@ -9,10 +11,11 @@ AMEX = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compus
 NASDAQ = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compustat/NASDAQ_data.xlsx"))
 
 # Merge data
+# Dette er kun nødvendig hvis du har et delt datasett, men for London og Japan er det vel ikke det? 
 NYSE_AMEX = merge.data.table(NYSE,AMEX)
 NYSE_AMEX = merge(NYSE, AMEX, all = TRUE)
 data = merge.data.table(NYSE_AMEX,NASDAQ)
-data = merge(NYSE_AMEX, NASDAQ, all = TRUE)
+data = merge(NYSE_AMEX, NASDAQ, all = TRUE) # Dette er endelig datasett jeg jobber med gjennom resten av koden 
 
 # Cleaning 
 colnames(data) = c("DATE", "SHRCD", "EXCHCD", "TICKER", "DLRET", "PRC", "RET", "SHROUT", "RET_NO_DIV")
@@ -47,11 +50,24 @@ data$MKTCAP = data[,MKTCAP:=abs(PRC)*SHROUT]
 # Create lagged mkt cap of each stock at each date
 data$MKTCAP_LAG = data[,MKTCAP_LAG:=shift(MKTCAP), by=TICKER]
 
+data[,Year:=year(DATE)]
+data[,Month:=month(DATE)]
+data[,key:=paste(Year,Month)]
+
 # Remove NA in MKTCAP_LAG
 data = data[,RET_NO_DIV:=NULL]
 data = data[,DLRET:=NULL]
 data = na.omit(data)
 
 # Create variable for SMB ranking. We define lagged market cap as a ranking variable
-MEDIAN = data[, `:=`(decile_month, cut(data$MKTCAP_LAG, breaks = quantile(data$MKTCAP_LAG[which(data$EXCHCD==1)],probs = c(0,0.5,1), na.rm = TRUE), include.lowest = TRUE, labels = FALSE)),by = key]
+data = data[, `:=`(decile_month, cut(MKTCAP_LAG, breaks = quantile(MKTCAP_LAG[which(EXCHCD==1)],probs = c(0,0.5,1), na.rm = TRUE), include.lowest = TRUE, labels = FALSE)),by = key]
+data = data[, `:=`(decile_month_help, cut(MKTCAP_LAG, breaks = quantile(MKTCAP_LAG,probs = c(0,0.5,1), na.rm = TRUE), include.lowest = TRUE, labels = FALSE)),by = key]
+data[,decile_month2:=ifelse(is.na(decile_month) & decile_month_help==1,1,ifelse(is.na(decile_month) & decile_month_help==2,2,decile_month))]
+
+data = data[,decile_month:=NULL] 
+data = data[,decile_month_help:=NULL] 
+
+smb_deciles=copy(data)
+
+
 
