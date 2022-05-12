@@ -88,6 +88,7 @@ data[,RET:=sum(PERMNO_weight*RET),by=.(PERMCO,key)]
 data[,MKTCAP_LAG:=sum(MKTCAP_LAG),by=.(PERMCO,key)]
 data=unique(data[,.(PERMNO,DATE,EXCHCD,MKTCAP,MKTCAP_LAG,RET,key,Year,month,PERMCO)],by=c("PERMCO","key"))
 setorder(data,PERMCO,key) 
+
 # Linking 
 
 
