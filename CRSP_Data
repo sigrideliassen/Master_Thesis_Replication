@@ -19,7 +19,7 @@ data = merge.data.table(NYSE_AMEX,NASDAQ)
 data = merge(NYSE_AMEX, NASDAQ, all = TRUE) # Dette er endelig datasett jeg jobber med gjennom resten av koden 
 
 # Cleaning 
-colnames(data) = c("DATE", "SHRCD", "EXCHCD", "TICKER", "DLRET", "PRC", "RET", "SHROUT", "RET_NO_DIV") " Her har jeg endret navn på variablene så det er omtrent konsistent med hans koder 
+colnames(data) = c("PERMNO", "DATE", "SHRCD", "EXCHCD", "DLRET", "PRC", "RET", "SHROUT", "RF") # Her har jeg endret navn på variablene så det er omtrent konsistent med hans koder 
 data$PRC = abs(data$PRC) # VI MÅ BLI ENIGE OM VI SKAL TA ABS ELLR IKKE!! Tenker vi bare kjører på med absolute prices jeg 
 
 # Sort by TICKER 
