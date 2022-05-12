@@ -90,6 +90,39 @@ data=unique(data[,.(PERMNO,DATE,EXCHCD,MKTCAP,MKTCAP_LAG,RET,key,Year,month,PERM
 setorder(data,PERMCO,key) 
 
 # Linking 
+# STEP 1: Link 
+link = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compustat/link.xlsx"))
+link$LINKDT = as.Date(strptime(link$LINKDT,format="%Y%m%d"))
+link$LINKENDDT = as.Date(strptime(link$LINKENDDT,format="%Y%m%d"))
+colnames(link) = c("GVKEY", "LTYPE", "LPERMNO", "LPERMCO", "F_DATE", "L_DATE", "LINKDT", "LINKENDDT")
+
+merged = merge(data,link,by.x ="PERMCO",by.y ="LPERMCO",allow.cartesian = T)
+setkey(merged)
+merged = merged[(is.na(LINKDT) | DATE>=merged$LINKDT) & (is.na(LINKENDDT) | DATE<=LINKENDDT)]
+setorder(merged,GVKEY,DATE)
+
+#============================================================================
+
+# Multiple GVKEYS per PERMCO
+# FIRST: if LC not LC linktype
+merged[,prob:=.N>1,by=.(PERMCO,DATE)]
+merged[,Good_match:=sum(LTYPE=='LC'),by=.(PERMCO,DATE)]
+merged = merged[!(prob==T & Good_match==T & LTYPE!='LC')]
+
+# SECOND: if P and not P linkprim
+merged[,prob:=.N>1,by=.(PERMCO,DATE)]
+merged[,Good_match:=sum(LTYPE=='P'),by=.(PERMCO,DATE)]
+merged = merged[!(prob==T & Good_match==T & LTYPE!='P')]
+
+# THIRD: if 1 and not 1 liid 
+merged[,prob:=.N>1,by=.(PERMCO,DATE)]
+merged[,Good_match:=sum(LIID==1),by=.(PERMCO,DATE)]
+merged=merged[!(prob==T & Good_match==T & LIID!=1)]
+
+
+
+
+
 
 
 
