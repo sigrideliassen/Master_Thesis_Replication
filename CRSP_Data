@@ -203,6 +203,72 @@ data[,BE:=SHE-PS]
 
 data=data[,c("GVKEY","key","PERMNO", "PERMCO", "DATE","EXCHCD","MKTCAP","MKTCAP_LAG","RET","Year.x","month.x","special_key.x","BE")]
 
+#============================================================================
+
+# Here I also define 10 decile for size portfolio
+
+ff = as.data.table(read.csv("Documents/Master/Master Thesis/FF_factors/fama.csv", header = FALSE, sep = ","))
+ff = ff[-1,]
+ff = ff[-1,]
+colnames(ff)=c("date","mktrf","SMB","HML","RMW", "CMA", "RF")
+ff = ff[-1,]
+ff=ff[-(1111:length(ff[[1]])),]
+for(i in 2:7)
+{
+  ff[[i]]=as.numeric(as.character(ff[[i]]))
+}
+
+ff[[1]]=as.character(ff[[1]])
+ff[[1]]=as.Date(paste(ff[[1]],"01",sep=""),format="%Y%m%d")
+setnames(ff,"date","date")
+setkey(ff,date)
+
+ff[,Year:=year(date)]
+ff[,month:=month(date)]
+ff[,key:=paste(Year,month)]
+
+ff[,`mktrf`:=`mktrf`/100]
+ff[,SMB:=SMB/100]
+ff[,HML:=HML/100]
+ff[,SMB:=RMW/100]
+ff[,HML:=CMA/100]
+ff[,RF:=RF/100]
+
+setkey(data,key)
+setkey(ff,key)
+a = merge(data,ff,by="key",all.x=TRUE)
+setorderv(a,c("GVKEY","special_key.x"))
+
+a[,DATE:=NULL]
+a[,mktrf:=NULL]
+a[,HML:=NULL]
+a[,SMB:=NULL]
+a[,RMW:=NULL]
+a[,CMA:=NULL]
+a[,month.x:=NULL]
+a[,Year.x:=NULL]
+
+
+a[,ret_rf:=RET-RF]
+
+#============================================================================
+
+data = copy(a)
+data = data[, if (.N > 12) .SD, by = GVKEY]
+
+library(zoo)
+library(dplyr)
+
+func <- function(z)
+{
+  return(prod(1+z[1:12])-1)
+}
+
+data[, rank_ret := rollapplyr(ret_rf, width = 13, FUN = func, fill = NA,align="left"), by = GVKEY]
+
+#============================================================================
+
+
 
 
 
