@@ -7,9 +7,9 @@ library(dplyr)
 # Import CRSP data 
 # Jeg trykker bare på "Import data" i stedet for å kode innhentingen (også lime inn i koden så du har den liggende til neste gang du kjører)
 library(readxl)
-NYSE = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compustat/NYSE_data.xlsx"))
-AMEX = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compustat/AMEX_data.xlsx"))
-NASDAQ = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compustat/NASDAQ_data.xlsx"))
+NYSE = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compustat/NYSE.xlsx"))
+AMEX = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compustat/AMEX.xlsx"))
+NASDAQ = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compustat/NASDAQ.xlsx"))
 
 # Merge data
 # Dette er kun nødvendig hvis du har et delt datasett, men for London og Japan er det vel ikke det? 
@@ -190,19 +190,21 @@ compustat[,special_key:=(compustat$Year+compustat$month/100)]
 x = merge(mergedlink,compustat,by=c('GVKEY','key'),all.x=TRUE)
 setorderv(x,c("GVKEY","special_key.x"))
 
-
-# ------------------------------------------------------------------------------------------------
+#============================================================================
 
 # Shareholder's Equity (SHE) 
-x[,SHE:=ifelse(!is.na(seq),seq,ifelse(!is.na(ceq+pstk),ceq+pstk,ifelse(!is.na(at+lt+mib),at-lt-mib,at-lt)))] 
+data[,SHE:=ifelse(!is.na(seq),seq,ifelse(!is.na(ceq+pstk),ceq+pstk,ifelse(!is.na(at+lt+mib),at-lt-mib,at-lt)))] 
 
 # Preferred Stock (PS)
-x[,PS:=ifelse(!is.na(pstkrv),pstkrv,ifelse(!is.na(pstkl),pstkl,pstk))]
+data[,PS:=ifelse(!is.na(pstkrv),pstkrv,ifelse(!is.na(pstkl),pstkl,pstk))]
 
-# Book Equity (BE)
-x[,prba1:=ifelse(!is.na(prba),prba,0)]
-x[,prba:=NULL]
-x[,BE:=SHE-PS+DT-prba1]
+# Book Equity (BE) = Common Equity per definition 
+data[,BE:=SHE-PS]
+
+data=data[,c("GVKEY","key","PERMNO", "PERMCO", "DATE","EXCHCD","MKTCAP","MKTCAP_LAG","RET","Year.x","month.x","special_key.x","BE")]
+
+
+
 
 
 
