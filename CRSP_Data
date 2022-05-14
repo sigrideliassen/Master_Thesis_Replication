@@ -92,13 +92,13 @@ setorder(data,PERMCO,key)
 # Linking 
 # STEP 1: Link 
 link = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compustat/link.xlsx"))
-link$LINKDT = as.Date(strptime(link$LINKDT,format="%Y%m%d"))
-link$LINKENDDT = as.Date(strptime(link$LINKENDDT,format="%Y%m%d"))
-colnames(link) = c("GVKEY", "LTYPE", "LPERMNO", "LPERMCO", "F_DATE", "L_DATE", "LINKDT", "LINKENDDT")
+link$LINKDT = as.Date(link$LINKDT,format="%Y%m%d")
+link$LINKENDDT = as.Date(link$LINKENDDT,format="%Y%m%d")
 
 merged = merge(data,link,by.x ="PERMCO",by.y ="LPERMCO",allow.cartesian = T)
+merged$DATE = as.Date(merged$DATE)
 setkey(merged)
-merged = merged[(is.na(LINKDT) | DATE>=merged$LINKDT) & (is.na(LINKENDDT) | DATE<=LINKENDDT)]
+merged = merged[(is.na(LINKDT) | merged$DATE>=merged$LINKDT) & (is.na(LINKENDDT) | DATE<=LINKENDDT)]
 setorder(merged,GVKEY,DATE)
 
 #============================================================================
@@ -106,21 +106,103 @@ setorder(merged,GVKEY,DATE)
 # Multiple GVKEYS per PERMCO
 # FIRST: if LC not LC linktype
 merged[,prob:=.N>1,by=.(PERMCO,DATE)]
-merged[,Good_match:=sum(LTYPE=='LC'),by=.(PERMCO,DATE)]
-merged = merged[!(prob==T & Good_match==T & LTYPE!='LC')]
+merged[,Good_match:=sum(LINKTYPE=='LC'),by=.(PERMCO,DATE)]
+merged = merged[!(prob==T & Good_match==T & LINKTYPE!='LC')]
 
 # SECOND: if P and not P linkprim
 merged[,prob:=.N>1,by=.(PERMCO,DATE)]
-merged[,Good_match:=sum(LTYPE=='P'),by=.(PERMCO,DATE)]
-merged = merged[!(prob==T & Good_match==T & LTYPE!='P')]
+merged[,Good_match:=sum(LINKTYPE=='P'),by=.(PERMCO,DATE)]
+merged = merged[!(prob==T & Good_match==T & LINKTYPE!='P')]
 
-# THIRD: if 1 and not 1 liid 
+# THIRD: if 1 and not 1 LIID 
 merged[,prob:=.N>1,by=.(PERMCO,DATE)]
 merged[,Good_match:=sum(LIID==1),by=.(PERMCO,DATE)]
-merged=merged[!(prob==T & Good_match==T & LIID!=1)]
+merged = merged[!(prob==T & Good_match==T & LIID!=1)]
+
+# FORTH: use the link that's current
+merged[,prob:=.N>1,by=.(PERMCO,DATE)]
+merged[,Good_match:=sum(is.na(LINKENDDT)),by=.(PERMCO,DATE)]
+merged = merged[!(prob==T & Good_match==T & !is.na(LINKENDDT))]
+
+# FIFTH: use the link that's been around the longest - FIKS DENNE 
+# dates$dates = as.data.table(merged$LINKENDDT) 
+# dates[-which(is.na(dates))]
+# dates = as.Date(dates$dates)
+# max(dates) 
+
+merged[,prob:=.N>1,by=.(PERMCO,DATE)]
+merged[,Good_match:=NULL]
+merged[is.na(LINKENDDT),LINKENDDT:=as.Date('2022-01-31','%Y-%m-%d')]
+merged[,Date_diff:=as.integer(LINKENDDT-LINKDT)]
+setorder(merged,PERMCO,DATE,Date_diff)
+merged[prob==T,Good_match:=Date_diff==Date_diff[.N],by=.(PERMCO,DATE)]
+merged = merged[!(prob==T & Good_match!=T)]
+
+# SIXTH: use GVKEY that's around the longest
+merged[,prob:=.N>1,by=.(PERMCO,DATE)]
+merged[,Good_match:=NULL]
+setorder(merged,GVKEY,LINKDT)
+merged[prob==T,start_Date:=LINKDT[1],by=.(GVKEY)]
+setorder(merged,GVKEY,LINKENDDT)
+merged[prob==T,end_Date:=LINKENDDT[.N],by=.(GVKEY)]
+merged[,Date_diff:=as.integer(end_Date-start_Date)]
+setorder(merged,PERMCO,DATE,Date_diff)
+merged[prob==T,Good_match:=Date_diff==Date_diff[.N],by=.(PERMCO,DATE)]
+merged = merged[!(prob==T & Good_match!=T)]
+
+# SEVENTH
+setorder(merged,PERMCO,DATE,GVKEY)
+merged = unique(merged,by=c('PERMCO','DATE'))
+
+# CLEAN UP
+if(nrow(unique(merged,by=c('GVKEY','DATE'))) !=nrow(merged) | nrow(unique(merged,by=c('PERMCO','DATE'))) !=nrow(merged)) {stop ('1. Monthly firm level returns.R: There is an issue with your merge between CRSP/Compustat')} 
+# mergedlink = merged[,.(QVKEY,DATE,EXCHCD,lag_mkt_cap,return,Date_diff)]
+mergedlink = copy(merged)
+mergedlink[,conm:=NULL]
+mergedlink[,LINKPRIM:=NULL]
+mergedlink[,LIID:=NULL]
+mergedlink[,LINKTYPE:=NULL]
+mergedlink[,LINKDT:=NULL]
+mergedlink[,LINKENDDT:=NULL]
+mergedlink[,prob:=NULL]
+mergedlink[,Date_diff:=NULL]
+mergedlink[,start_Date:=NULL]
+mergedlink[,end_Date:=NULL]
+mergedlink[,Good_match:=NULL]
+mergedlink[,special_key:=(mergedlink$Year+mergedlink$month/100)]
+
+#============================================================================
+#============================================================================
+#============================================================================
+
+# Merge with COMPUSTAT
+compustat = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compustat/compustat.xlsx"))
+compustat$datadate = as.Date(compustat$datadate,format="%Y%m%d")
+
+compustat[,Year:=year(datadate)]
+compustat[,month:=month(datadate)]
+compustat[,key:=paste(Year,month)]
+
+setkey(compustat,key)
+
+compustat[,special_key:=(compustat$Year+compustat$month/100)]
+
+x = merge(mergedlink,compustat,by=c('GVKEY','key'),all.x=TRUE)
+setorderv(x,c("GVKEY","special_key.x"))
 
 
+# ------------------------------------------------------------------------------------------------
 
+# Shareholder's Equity (SHE) 
+x[,SHE:=ifelse(!is.na(seq),seq,ifelse(!is.na(ceq+pstk),ceq+pstk,ifelse(!is.na(at+lt+mib),at-lt-mib,at-lt)))] 
+
+# Preferred Stock (PS)
+x[,PS:=ifelse(!is.na(pstkrv),pstkrv,ifelse(!is.na(pstkl),pstkl,pstk))]
+
+# Book Equity (BE)
+x[,prba1:=ifelse(!is.na(prba),prba,0)]
+x[,prba:=NULL]
+x[,BE:=SHE-PS+DT-prba1]
 
 
 
