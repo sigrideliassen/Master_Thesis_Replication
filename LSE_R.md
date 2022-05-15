@@ -12,13 +12,35 @@ install.packages("tidyr")
 library(tidyr)
 
 
+# Market Capitalization 
+
+## 1st cleaning in Excel
+## Delete the Error columns in Excel before importing the set to R. 
+## This reduces the data set to 7458
+
+library(readxl)
+MV_LSE_Raw <- read_excel("Documents/Master thesis/DATA/Ready for R/MV_LSE_Raw.xlsx")
+
+## Change layout of the Dataset using the tidyr package
+MV_LSE <- pivot_longer(MV_LSE_Raw, 2:7458, names_to = "Company", values_to = "MV")
+MV_LSE <- str_remove(MV_LSE, "^.*(?=(-))") # excluding the -
+
+## Delete the part of the security name to shorten the names 
+### We also cut the code PLC to make the data sets comparable they use different endings (use the base?) 
+MV_LSE$Company <- gsub(" - MARKET VALUE","",as.character(MV_LSE$Company))
+
+
+## Sort the findings based on the Company name 
+data <- BE_LSE[order(BE_LSE$Company),]
+
+
 
 
 
 # Book Equity 
 
 ## Delete the Error columns in Excel before importing the set to R. 
-## This reduces the dataset from 8481 variables to 4803
+## This reduces the data set from 8481 variables to 4803
 
 ## Import Common Equity (WC03501) from Refinitiv Eikon using Datastream 
 library(readxl)
@@ -26,12 +48,14 @@ BE_LSE_Raw <- read_excel("Documents/Master thesis/DATA/Ready for R/BE_LSE_Raw.xl
 
 ## Change layout of the Dataset using the tidyr package
 BE_LSE <- pivot_longer(BE_LSE_Raw, 2:4803, names_to = "Company", values_to = "BE")
-BE_LSE$Company<-gsub(" - COMMON SHAREHOLDERS' EQUITY","",as.character(BE_LSE$Company))
+
+## Delete the part of the security name to shorten the names 
+### We also cut the code PLC to make the data sets comparable they use different endings (use the base?) 
+BE_LSE$Company <- gsub(" PLC - COMMON SHAREHOLDERS' EQUITY","",as.character(BE_LSE$Company))
+# How should we do this? 
 
 ## Sort the findings based on the Company name 
 data <- BE_LSE[order(BE_LSE$Company),]
-
-
 
 
 
