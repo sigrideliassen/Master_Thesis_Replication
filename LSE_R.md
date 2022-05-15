@@ -24,6 +24,7 @@ MV_LSE_Raw <- read_excel("Documents/Master thesis/DATA/Ready for R/MV_LSE_Raw.xl
 ## Change layout of the Dataset using the tidyr package
 MV_LSE <- pivot_longer(MV_LSE_Raw, 2:7458, names_to = "Company", values_to = "MV")
 MV_LSE <- str_remove(MV_LSE, "^.*(?=(-))") # excluding the -
+sub("-.*", "", string)
 
 ## Delete the part of the security name to shorten the names 
 ### We also cut the code PLC to make the data sets comparable they use different endings (use the base?) 
