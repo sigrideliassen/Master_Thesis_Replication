@@ -33,7 +33,7 @@ MV_LSE$ID <- gsub("()","",as.character(MV_LSE$ID))
 ### Not able to delete (). why?
 
 ## Sort the findings based on the ID
-data <- MV_LSE[order(MV_LSE$ID),]
+data1 <- MV_LSE[order(MV_LSE$ID),]
 
 
 
@@ -56,11 +56,13 @@ BV_LSE$ID <- gsub("()","",as.character(BV_LSE$ID))
 ## Sort the findings based on the ID
 data2 <- BV_LSE[order(BV_LSE$ID),]
 
+# Delete Errors, NA and 0 from the dataset
+data1 = na.omit(data1)
+data2 = na.omit(data2)
 
 
-
-
-
+# Merge the two datasets 
+data = merge.data.table(data1, data2) data = merge(data1, data2, all = TRUE)
 
 
 
@@ -70,11 +72,7 @@ data2 <- BV_LSE[order(BV_LSE$ID),]
 data = merge.data.table(LSE_Book_Equity_data1, LSE_Book_Equity_Data2)
 data = merge(LSE_Book_Equity_data1, LSE_Book_Equity_Data2, all = TRUE)
 
-# Cleaning
-## Delete Errors, NA and 0 from the dataset
-index = which(is.na(data$BE))
-data = data[-which(is.na(data$BE))]
-data = na.omit(data)
+
 
 #Cancel
 MV_LSE$Company <- sub("-.*", "", MV_LSE$Company)
