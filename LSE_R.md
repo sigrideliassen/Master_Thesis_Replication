@@ -74,6 +74,8 @@ index = which(is.na(data$BE))
 data = data[-which(is.na(data$BE))]
 data = na.omit(data)
 
+#Cancel
+MV_LSE$Company <- sub("-.*", "", MV_LSE$Company)
 
 
 
