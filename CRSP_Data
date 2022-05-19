@@ -13,6 +13,11 @@ NYSE_AMEX = merge.data.table(NYSE,AMEX)
 NYSE_AMEX = merge(NYSE, AMEX, all = TRUE)
 data = merge.data.table(NYSE_AMEX,NASDAQ)
 data = merge(NYSE_AMEX, NASDAQ, all = TRUE)
+rm(NYSE_AMEX, AMEX, NYSE, NASDAQ)
+
+#============================================================================
+#============================================================================
+#============================================================================
 
 # Cleaning 
 data$DATE = as.Date(data$DATE)
@@ -33,10 +38,13 @@ P = data$PRC
 P[P=index] <- P[index - 1]*(1 + data$RET[index])
 data$PRC = P 
 
-# NA prices and returns without delisiting returns - DELETING ROWS
-index2 = which(is.na(data$RET))
+# NA prices and returns without delisting returns - DELETING ROWS
 data = data[-which(is.na(data$PRC))]
 data = data[-which(is.na(data$RET))]
+
+#============================================================================
+#============================================================================
+#============================================================================
 
 # FINDING MARKET CAP 
 data$MKTCAP = data[,MKTCAP:=abs(PRC)*SHROUT]
@@ -46,9 +54,11 @@ setkey(data,PERMNO,DATE)
 vec=c('PERMNO','DATE')
 setorderv(data,vec) 
 
-# Create lagged mkt cap of each stock at each date
+# CREATE LAGGED MARKET CAP OF EACH STOCK AT EACH DATE 
 data$MKTCAP_LAG = data[,MKTCAP_LAG:=shift(MKTCAP), by=PERMNO]
 
+#============================================================================
+#============================================================================
 #============================================================================
 
 data[,Year:=year(DATE)]
@@ -62,25 +72,32 @@ data = data[,PRC:=NULL]
 data = data[,SHROUT:=NULL]
 data = na.omit(data)
 
+#============================================================================
+#============================================================================
+#============================================================================
+
 # Create variable for SMB ranking. We define lagged market cap as a ranking variable
-data = data[, `:=`(decile_month, cut(MKTCAP_LAG, breaks = quantile(MKTCAP_LAG[which(EXCHCD==1)],probs = c(0,0.5,1), na.rm = TRUE), include.lowest = TRUE, labels = FALSE)),by = key]
-data = data[, `:=`(decile_month_help, cut(MKTCAP_LAG, breaks = quantile(MKTCAP_LAG,probs = c(0,0.5,1), na.rm = TRUE), include.lowest = TRUE, labels = FALSE)),by = key]
-data[,decile_month2:=ifelse(is.na(decile_month) & decile_month_help==1,1,ifelse(is.na(decile_month) & decile_month_help==2,2,decile_month))]
+# data = data[, `:=`(decile_month, cut(MKTCAP_LAG, breaks = quantile(MKTCAP_LAG[which(EXCHCD==1)],probs = c(0,0.5,1), na.rm = TRUE), include.lowest = TRUE, labels = FALSE)),by = key]
+# data = data[, `:=`(decile_month_help, cut(MKTCAP_LAG, breaks = quantile(MKTCAP_LAG,probs = c(0,0.5,1), na.rm = TRUE), include.lowest = TRUE, labels = FALSE)),by = key]
+# data[,decile_month2:=ifelse(is.na(decile_month) & decile_month_help==1,1,ifelse(is.na(decile_month) & decile_month_help==2,2,decile_month))]
 
-data = data[,decile_month:=NULL] 
-data = data[,decile_month_help:=NULL] 
+# data = data[,decile_month:=NULL] 
+# data = data[,decile_month_help:=NULL] 
 
-smb_deciles = copy(data)
+# smb_deciles = copy(data)
 
-# Aggreaate return of firm that has several securities traded
-data[,PERMNO_weight:=MKTCAP_LAG/sum(MKTCAP_LAG)]
-data[,RET_W:=sum(PERMNO_weight*RET),by=.(PERMCO,key)]
-data[,MKTCAP_LAG:=sum(MKTCAP_LAG),by=.(PERMCO,key)]
-data=unique(data[,.(PERMNO,DATE,EXCHCD,MKTCAP,MKTCAP_LAG,RET,RET_W,key,Year,month,PERMCO)],by=c("PERMCO","key"))
-setorder(data,PERMCO,key) 
+# Aggregate return of firm that has several securities traded
+# data[,PERMNO_weight:=MKTCAP_LAG/sum(MKTCAP_LAG)]
+# data[,RET_W:=sum(PERMNO_weight*RET),by=.(PERMCO,key)]
+# data[,MKTCAP_LAG:=sum(MKTCAP_LAG),by=.(PERMCO,key)]
+# data=unique(data[,.(PERMNO,DATE,EXCHCD,MKTCAP,MKTCAP_LAG,RET,RET_W,key,Year,month,PERMCO)],by=c("PERMCO","key"))
+# setorder(data,PERMCO,key) 
+
+#============================================================================
+#============================================================================
+#============================================================================
 
 # Linking 
-# STEP 1: Link 
 link = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compustat/link.xlsx"))
 link$LINKDT = as.Date(link$LINKDT,format="%Y%m%d")
 link$LINKENDDT = as.Date(link$LINKENDDT,format="%Y%m%d")
@@ -91,8 +108,11 @@ merged = merged[(is.na(LINKDT) | merged$DATE>=merged$LINKDT) & (is.na(LINKENDDT)
 setorder(merged,GVKEY,DATE)
 
 #============================================================================
+#============================================================================
+#============================================================================
 
 # Multiple GVKEYS per PERMCO
+
 # FIRST: if LC not LC linktype
 merged[,prob:=.N>1,by=.(PERMCO,DATE)]
 merged[,Good_match:=sum(LINKTYPE=='LC'),by=.(PERMCO,DATE)]
@@ -117,6 +137,7 @@ merged = merged[!(prob==T & Good_match==T & !is.na(LINKENDDT))]
 dates = as.data.table(merged$LINKENDDT) 
 dates = dates[-which(is.na(dates))]
 max(dates$V1) 
+rm(dates)
 
 merged[,prob:=.N>1,by=.(PERMCO,DATE)]
 merged[,Good_match:=NULL]
@@ -126,7 +147,7 @@ setorder(merged,PERMCO,DATE,Date_diff)
 merged[prob==T,Good_match:=Date_diff==Date_diff[.N],by=.(PERMCO,DATE)]
 merged = merged[!(prob==T & Good_match!=T)]
 
-# SIXTH: use GVKEY that's around the longest
+# SIXTH: use GVKEY that's been around the longest
 merged[,prob:=.N>1,by=.(PERMCO,DATE)]
 merged[,Good_match:=NULL]
 setorder(merged,GVKEY,LINKDT)
@@ -160,22 +181,56 @@ mergedlink[,Good_match:=NULL]
 mergedlink[,special_key:=(mergedlink$Year+mergedlink$month/100)]
 
 #============================================================================
+#============================================================================
+#============================================================================
 
-# Merge with COMPUSTAT
-compustat = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compustat/compustat.xlsx"))
-compustat$datadate = as.Date(compustat$datadate,format="%Y%m%d")
+# Merge data with COMPUSTAT
+bm = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compustat/bm.xlsx"))
+profitability = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compustat/profitability.xlsx"))
+investment = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compustat/investment.xlsx"))
+bm$datadate = as.Date(bm$datadate,format="%Y%m%d")
+profitability$datadate = as.Date(profitability$datadate,format="%Y%m%d")
+investment$datadate = as.Date(investment$datadate,format="%Y%m%d")
 
-compustat[,Year:=year(datadate)]
-compustat[,month:=month(datadate)]
-compustat[,key:=paste(Year,month)]
+bm[,Year:=year(datadate)]
+bm[,month:=month(datadate)]
+bm[,key:=paste(Year,month)]
 
-setkey(compustat,key)
+profitability[,Year:=year(datadate)]
+profitability[,month:=month(datadate)]
+profitability[,key:=paste(Year,month)]
 
-compustat[,special_key:=(compustat$Year+compustat$month/100)]
+investment[,Year:=year(datadate)]
+investment[,month:=month(datadate)]
+investment[,key:=paste(Year,month)]
 
-data = merge(mergedlink,compustat,by=c('GVKEY','key'),all.x=TRUE)
+setkey(bm,key)
+setkey(profitability,key)
+setkey(investment,key)
+
+bm[,special_key:=(bm$Year+bm$month/100)]
+profitability[,special_key:=(profitability$Year+profitability$month/100)]
+investment[,special_key:=(investment$Year+investment$month/100)]
+
+data1 = merge(bm,profitability,by=c('GVKEY', 'key'),all.x=TRUE)
+data2 = merge(data1,investment,by=c('GVKEY', 'key'),all.x=TRUE)
+
+data2[,Year.x:=NULL]
+data2[,month.x:=NULL]
+data2[,Year.y:=NULL]
+data2[,month.y:=NULL]
+data2[,datadate.x:=NULL]
+data2[,datadate.y:=NULL]
+data2[,special_key.x:=NULL]
+data2[,special_key.y:=NULL]
+data2[,fiscaldate.x:=NULL]
+data2[,fiscaldate.y:=NULL]
+
+data = merge(mergedlink,data2,by=c('GVKEY','key'),all.x=TRUE)
 setorderv(data,c("GVKEY","special_key.x"))
 
+#============================================================================
+#============================================================================
 #============================================================================
 
 # Shareholder's Equity (SHE) 
@@ -187,8 +242,15 @@ data[,PS:=ifelse(!is.na(pstkrv),pstkrv,ifelse(!is.na(pstkl),pstkl,pstk))]
 # Book Equity (BE) = Common Equity per definition 
 data[,BE:=SHE-PS]
 
+# Profitability (OP) 
+data[,OP:=ifelse(!is.na(rev+cogs+expense+interest),(rev-cogs-expense-interest)/BE,NA)]
+
+# Investment (INV) 
+
 data = data[,c("GVKEY","key","PERMNO", "PERMCO", "DATE","EXCHCD","MKTCAP","MKTCAP_LAG","RET","Year.x","month.x","special_key.x","BE")]
 
+#============================================================================
+#============================================================================
 #============================================================================
 
 # Here I also define 10 decile for size portfolio
@@ -489,6 +551,7 @@ fama_size_deciles = as.data.table(read_excel("C:\\Users\\Rustem\\Desktop\\Quanti
 fama_size_deciles = fama_size_deciles[X__1>=1990 & X__1<2015,]
 fama_size_deciles = fama_size_deciles[,c(11:20)]
 fama_size_deciles = fama_size_deciles/100
+
 
 
 
