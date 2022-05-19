@@ -185,16 +185,21 @@ mergedlink[,special_key:=(mergedlink$Year+mergedlink$month/100)]
 #============================================================================
 
 # Merge data with COMPUSTAT
-bm = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compustat/bm.xlsx"))
+bm_data = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compustat/bm.xlsx"))
 profitability = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compustat/profitability.xlsx"))
 investment = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compustat/investment.xlsx"))
-bm$datadate = as.Date(bm$datadate,format="%Y%m%d")
+bm_data$datadate = as.Date(bm_data$datadate,format="%Y%m%d")
 profitability$datadate = as.Date(profitability$datadate,format="%Y%m%d")
 investment$datadate = as.Date(investment$datadate,format="%Y%m%d")
 
-bm[,Year:=year(datadate)]
-bm[,month:=month(datadate)]
-bm[,key:=paste(Year,month)]
+# Lagged assets 
+investment[,assets_t_min_1:=shift(assets)]
+investment[,assets_t_min_2:=shift(assets_t_min_1)]
+investment[,assets:=NULL]
+
+bm_data[,Year:=year(datadate)]
+bm_data[,month:=month(datadate)]
+bm_data[,key:=paste(Year,month)]
 
 profitability[,Year:=year(datadate)]
 profitability[,month:=month(datadate)]
@@ -204,30 +209,29 @@ investment[,Year:=year(datadate)]
 investment[,month:=month(datadate)]
 investment[,key:=paste(Year,month)]
 
-setkey(bm,key)
+setkey(bm_data,key)
 setkey(profitability,key)
 setkey(investment,key)
 
-bm[,special_key:=(bm$Year+bm$month/100)]
+bm_data[,special_key:=(bm_data$Year+bm$month/100)]
 profitability[,special_key:=(profitability$Year+profitability$month/100)]
 investment[,special_key:=(investment$Year+investment$month/100)]
 
-data1 = merge(bm,profitability,by=c('GVKEY', 'key'),all.x=TRUE)
+data1 = merge(bm_data,profitability,by=c('GVKEY', 'key'),all.x=TRUE)
 data2 = merge(data1,investment,by=c('GVKEY', 'key'),all.x=TRUE)
 
 data2[,Year.x:=NULL]
-data2[,month.x:=NULL]
 data2[,Year.y:=NULL]
+data2[,month.x:=NULL]
 data2[,month.y:=NULL]
-data2[,datadate.x:=NULL]
 data2[,datadate.y:=NULL]
-data2[,special_key.x:=NULL]
-data2[,special_key.y:=NULL]
 data2[,fiscaldate.x:=NULL]
 data2[,fiscaldate.y:=NULL]
+data2[,special_key.x:=NULL]
+data2[,LIID.y:=NULL]
 
 data = merge(mergedlink,data2,by=c('GVKEY','key'),all.x=TRUE)
-setorderv(data,c("GVKEY","special_key.x"))
+setorderv(data,c("GVKEY","special_key.y"))
 
 #============================================================================
 #============================================================================
@@ -242,12 +246,8 @@ data[,PS:=ifelse(!is.na(pstkrv),pstkrv,ifelse(!is.na(pstkl),pstkl,pstk))]
 # Book Equity (BE) = Common Equity per definition 
 data[,BE:=SHE-PS]
 
-# Profitability (OP) 
-data[,OP:=ifelse(!is.na(rev+cogs+expense+interest),(rev-cogs-expense-interest)/BE,NA)]
-
-# Investment (INV) 
-
-data = data[,c("GVKEY","key","PERMNO", "PERMCO", "DATE","EXCHCD","MKTCAP","MKTCAP_LAG","RET","Year.x","month.x","special_key.x","BE")]
+# Investment (INV)
+data[,INV:=(assets_t_min_2-assets_t_min_1)/assets_t_min_2]
 
 #============================================================================
 #============================================================================
@@ -259,7 +259,6 @@ ff = ff[-1,]
 ff = ff[-1,]
 colnames(ff)=c("date","mktrf","SMB","HML","RMW", "CMA", "RF")
 ff = ff[-1,]
-# ff = ff[-(1111:length(ff[[1]])),] # MÅ FINNE UT HVA DENNE GJØR 
 ff = ff[324:630,] # ENDRE DENNE MED NYTT DATASETT 
 for(i in 2:7)
 {
@@ -275,7 +274,7 @@ ff[,Year:=year(date)]
 ff[,month:=month(date)]
 ff[,key:=paste(Year,month)]
 
-ff[,`mktrf`:=`mktrf`/100]
+ff[,mktrf:=mktrf/100]
 ff[,SMB:=SMB/100]
 ff[,HML:=HML/100]
 ff[,SMB:=RMW/100]
@@ -300,6 +299,8 @@ a[,Year.x:=NULL]
 a[,ret_rf:=RET-RF] # HER BRUKER JEG RET UVEKTET - RIKTIG?  
 
 #============================================================================
+#============================================================================
+#============================================================================
 
 data = copy(a)
 data = data[, if (.N > 12) .SD, by = GVKEY]
@@ -315,6 +316,8 @@ func <- function(z)
 data[, rank_ret := rollapplyr(ret_rf, width = 13, FUN = func, fill = NA, align="left"), by = GVKEY]
 
 #============================================================================
+#============================================================================
+#============================================================================
 
 library(e1071)
 data[, `:=`(decile_month, cut(MKTCAP, breaks = quantile(MKTCAP[which(EXCHCD==1)],probs = c(0,0.5,1), na.rm = TRUE), include.lowest = TRUE, labels = FALSE)),by = key]
@@ -328,19 +331,32 @@ data = data[,decile_month_help:=NULL]
 # setnames(data,"Year.x","Year")
 # setnames(data,"month.x","month")
 
+#============================================================================
+#============================================================================
+#============================================================================
+
+
+#################### HERFRA OG NED MÅ DET RYDDES!!! ##########################
+
+# Create investment (INV) 
+data[,INV:=(assets_t_min_2-assets_t_min_1)/assets_t_min_2]
+
 data[,smb_june_decile:=ifelse(month==6,smb_decile,NA)] # Is it month 7 or month 6? check later
 
 # Create lagged BE
 new = data[,c("GVKEY","key","date","EXCHCD","MKTCAP_LAG","RET","BE","Year","month")]
 new = na.omit(new)
 new[,lagged_BE_by_year:=shift(BE),by=GVKEY]
-new = new[,c("GVKEY","key","Year","EXCHCD","lagged_BE_by_year")]
+new = new[,c("GVKEY","date","key","Year","EXCHCD","lagged_BE_by_year")]
 
-data = merge(data,new,by=c('GVKEY','key'),all.x=TRUE)
-setorderv(data,c("GVKEY","special_key.x"))
+# Create profitability (OP) 
+data[,OP:=ifelse(!is.na(rev+cogs+expense+interest),(rev-cogs-expense-interest)/lagged_BE_by_year,NA)]
+
+data = merge(data,new,by=c('GVKEY','key'),allow.cartesian = TRUE)
+setorderv(data,c("GVKEY","special_key"))
 
 # Create December ME
-new2 = data[month==12,c("GVKEY","key","date","EXCHCD.x","MKTCAP_LAG","RET","Year.x","month")]
+new2 = data[month==12,c("GVKEY","key","date.x","EXCHCD.x","MKTCAP_LAG","RET","Year.x","month")]
 new2[,lagged_december_ME:=shift(MKTCAP_LAG),by=GVKEY]
 new2 = new2[,c("GVKEY","key","Year.x","EXCHCD.x","lagged_december_ME")]
 new2 = na.omit(new2)
@@ -349,12 +365,19 @@ colnames(new2) = c("GVKEY","key","Year","EXCHCD","lagged_december_ME")
 new3 = data[month==6,c("GVKEY","key","Year.x","rank_ret","smb_decile","EXCHCD.x","MKTCAP","MKTCAP_LAG")]
 colnames(new3) = c("GVKEY","key","Year","rank_ret","smb_decile","EXCHCD","MKTCAP","MKTCAP_LAG")
 
-t = merge(new,new2,by=c('GVKEY','Year'))
+# Create BM 
+t = merge(new,new2,by=c('GVKEY','Year'), allow.cartesian = TRUE)
 t[,key.y:=NULL]
 setorderv(t,c("GVKEY","Year"))
 t[,lagged_BE_by_year:=lagged_BE_by_year*1000]
 t[,BM:=lagged_BE_by_year/lagged_december_ME]
 t = na.omit(t)
+
+# data = data[,c("GVKEY","key","PERMNO", "PERMCO", "DATE","EXCHCD","MKTCAP","MKTCAP_LAG","RET","Year.x","month.x","special_key.x", "OP", "INV")]
+
+#============================================================================
+#============================================================================
+#============================================================================
 
 # Merge
 setnames(t,"key.x","key")
@@ -364,6 +387,8 @@ setorderv(t,c("GVKEY","Year"))
 
 t[,lagged_BE_by_year:=NULL]
 t[,lagged_december_ME:=NULL]
+t[,assets_t_min_1:=NULL]
+t[,assets_t_min_2:=NULL]
 t[,key.x:=NULL]
 setnames(t,"key.y","key")
 setnames(t,"smb_decile","size_decile")
@@ -381,6 +406,10 @@ t = t[Year>=1990,]
 
 tt = copy(t)
 
+#============================================================================
+#============================================================================
+#============================================================================
+
 # Here I calculate 10 deciles for BM portfolios
 t = copy(tt)
 t[, `:=`(decile_month, cut(BM, breaks = quantile(BM[which(EXCHCD==1)],probs = c(0:10)/10, na.rm = TRUE), include.lowest = TRUE, labels = FALSE)),by = key]
@@ -389,6 +418,10 @@ t[,new_BM_decile:=ifelse(is.na(decile_month) & decile_month_help<=5,1,ifelse(is.
 
 t = t[,decile_month:=NULL]
 t = t[,decile_month_help:=NULL]
+
+#============================================================================
+#============================================================================
+#============================================================================
 
 xx = t[,c("GVKEY","key","EXCHCD","MKTCAP","MKTCAP_LAG","rank_ret","Year","new_BM_decile")]
 xx = na.omit(xx)
@@ -400,6 +433,10 @@ z = xx[, weighted.mean(rank_ret,weight), by = .(key,new_BM_decile,Year)] # Her h
 setorderv(z,c("Year","new_BM_decile"))
 
 setnames(z,"V1","return_decile")
+
+#============================================================================
+#============================================================================
+#============================================================================
 
 fin1 = matrix(0,nrow=4,ncol=10)
 table = z
@@ -416,6 +453,10 @@ rownames(fin1) = c('mean','sigma','SR','SK(m)')
 colnames(fin1) = c(paste0('Decile ',seq(1,10,1)))
 fin1
 
+#============================================================================
+#============================================================================
+#============================================================================
+
 t = copy(tt)
 t[, `:=`(decile_month, cut(MKTCAP, breaks = quantile(MKTCAP[which(EXCHCD==1)],probs = c(0:10)/10, na.rm = TRUE), include.lowest = TRUE, labels = FALSE)),by = key]
 t[, `:=`(decile_month_help, cut(MKTCAP, breaks = quantile(MKTCAP,probs = c(0:10)/10, na.rm = TRUE), include.lowest = TRUE, labels = FALSE)),by = key]
@@ -423,6 +464,10 @@ t[,new_size_decile:=ifelse(is.na(decile_month) & decile_month_help<=5,1,ifelse(i
 
 t = t[,decile_month:=NULL]
 t = t[,decile_month_help:=NULL]
+
+#============================================================================
+#============================================================================
+#============================================================================
 
 xx = t[,c("GVKEY","key","EXCHCD","MKTCAP","MKTCAP_LAG","rank_ret","Year","new_size_decile")]
 xx = na.omit(xx)
@@ -434,6 +479,10 @@ z = xx[, weighted.mean(rank_ret,weight), by = .(key,new_size_decile,Year)]
 setorderv(z,c("Year","new_size_decile"))
 
 setnames(z,"V1","return_decile")
+
+#============================================================================
+#============================================================================
+#============================================================================
 
 fin11 = matrix(0,nrow=4,ncol=10)
 table = z
@@ -451,6 +500,8 @@ colnames(fin11) = c(paste0('Decile ',seq(1,10,1)))
 fin11
 
 #============================================================================
+#============================================================================
+#============================================================================
 
 # Create 6 portfolios
 
@@ -466,12 +517,18 @@ z = t[, weighted.mean(rank_ret,weight), by = .(key,Year,size_decile,bm_decile)]
 setnames(z,"V1","return_decile")
 setorderv(z,c("Year","size_decile","bm_decile"))
 
+#============================================================================
+#============================================================================
+#============================================================================
+
 w = copy(z)
 
 z = z[,mean(return_decile),by=.(size_decile,bm_decile)]
 rownames(z) = c("small_growth","small_neutral","small_value","big_growth","big_neutral","big_value")
 z
 
+#============================================================================
+#============================================================================
 #============================================================================
 
 # Find HML and SMB
@@ -513,6 +570,10 @@ R_BL = w$return_decile[which(w$port=="BL")]
 R_BM = w$return_decile[which(w$port=="BM")]
 R_BH = w$return_decile[which(w$port=="BH")]
 
+#============================================================================
+#============================================================================
+#============================================================================
+
 # Create SMB (small minus big)
 RS = (1/3)*(R_SL + R_SM + R_SH)
 RB = (1/3)*(R_BL + R_BM + R_BH)
@@ -526,6 +587,10 @@ HML = RH - RL
 # Create RMW (robust minus weak)
 
 # Create CMA (conservative minus aggresive)
+
+#============================================================================
+#============================================================================
+#============================================================================
 
 fin111 = matrix(0,nrow=4,ncol=8)
 table=data.frame(R_SL,R_SM,R_SH,R_BL,R_BM,R_BH,SMB,HML)
@@ -543,6 +608,8 @@ colnames(fin111) = c(colnames(table))
 fin111
 
 #============================================================================
+#============================================================================
+#============================================================================
 
 # Correlation
 
@@ -551,7 +618,6 @@ fama_size_deciles = as.data.table(read_excel("C:\\Users\\Rustem\\Desktop\\Quanti
 fama_size_deciles = fama_size_deciles[X__1>=1990 & X__1<2015,]
 fama_size_deciles = fama_size_deciles[,c(11:20)]
 fama_size_deciles = fama_size_deciles/100
-
 
 
 
