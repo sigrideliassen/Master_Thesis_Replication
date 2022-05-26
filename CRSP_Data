@@ -1,29 +1,37 @@
 library(data.table)
 library(zoo)
 library(dplyr)
-  
-# Import CRSP data 
+
+library(scales)     # for nicer axes of figures
+library(viridis)    # for nicer colors in figures
+library(vroom)      # for fast csv reading
+
+#============================================================================
+#============================================================================
+#============================================================================
+
+# IMPORT CRSP DATA # 
 library(readxl)
 NYSE = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compustat/NYSE.xlsx"))
 AMEX = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compustat/AMEX.xlsx"))
 NASDAQ = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compustat/NASDAQ.xlsx"))
 
-# Merge data
-NYSE_AMEX = merge.data.table(NYSE,AMEX)
-NYSE_AMEX = merge(NYSE, AMEX, all = TRUE)
-data = merge.data.table(NYSE_AMEX,NASDAQ)
-data = merge(NYSE_AMEX, NASDAQ, all = TRUE)
-rm(NYSE_AMEX, AMEX, NYSE, NASDAQ)
+# MERGE DATA # 
+data = merge(NYSE, AMEX, all = TRUE)
+data = merge(data, NASDAQ, all = TRUE)
+rm(AMEX, NYSE, NASDAQ)
 
 #============================================================================
 #============================================================================
 #============================================================================
 
-# Cleaning 
+# CLEANING # 
+data$RET = as.numeric(data$RET)*100
+data$DLRET = as.numeric(data$DLRET)*100
 data$DATE = as.Date(data$DATE)
 data$PRC = abs(data$PRC) 
 
-# Replace NA returns with delisted returns 
+# Replace NA returns with delisted returns # 
 index = which(!is.na(data$DLRET))
 D_R = data$DLRET[index]
 R = data$RET
@@ -32,13 +40,13 @@ data$RET = R
 
 data = data[-which(is.na(data$SHROUT))]
 
-# Replace NA prices calculated from delisted returns 
+# Replace NA prices calculated from delisted returns # 
 index = which(!is.na(data$DLRET))
 P = data$PRC
 P[P=index] <- P[index - 1]*(1 + data$RET[index])
 data$PRC = P 
 
-# NA prices and returns without delisting returns - DELETING ROWS
+# NA prices and returns without delisting returns - DELETING ROWS # 
 data = data[-which(is.na(data$PRC))]
 data = data[-which(is.na(data$RET))]
 
@@ -55,7 +63,7 @@ vec=c('PERMNO','DATE')
 setorderv(data,vec) 
 
 # CREATE LAGGED MARKET CAP OF EACH STOCK AT EACH DATE 
-data$MKTCAP_LAG = data[,MKTCAP_LAG:=shift(MKTCAP), by=PERMNO]
+# data$MKTCAP_LAG = data[,MKTCAP_LAG:=shift(MKTCAP), by=PERMNO]
 
 #============================================================================
 #============================================================================
@@ -65,9 +73,9 @@ data[,Year:=year(DATE)]
 data[,month:=month(DATE)]
 data[,key:=paste(Year,month)]
 
-# Remove NA in MKTCAP_LAG
-data = data[,DLRET:=NULL]
+# Remove NA and redundant data # 
 data = data[,SHRCD:=NULL]
+data = data[,DLRET:=NULL]
 data = data[,PRC:=NULL]
 data = data[,SHROUT:=NULL]
 data = na.omit(data)
@@ -76,28 +84,18 @@ data = na.omit(data)
 #============================================================================
 #============================================================================
 
-# Create variable for SMB ranking. We define lagged market cap as a ranking variable
-# data = data[, `:=`(decile_month, cut(MKTCAP_LAG, breaks = quantile(MKTCAP_LAG[which(EXCHCD==1)],probs = c(0,0.5,1), na.rm = TRUE), include.lowest = TRUE, labels = FALSE)),by = key]
-# data = data[, `:=`(decile_month_help, cut(MKTCAP_LAG, breaks = quantile(MKTCAP_LAG,probs = c(0,0.5,1), na.rm = TRUE), include.lowest = TRUE, labels = FALSE)),by = key]
-# data[,decile_month2:=ifelse(is.na(decile_month) & decile_month_help==1,1,ifelse(is.na(decile_month) & decile_month_help==2,2,decile_month))]
-
-# data = data[,decile_month:=NULL] 
-# data = data[,decile_month_help:=NULL] 
-
-# smb_deciles = copy(data)
-
 # Aggregate return of firm that has several securities traded
 # data[,PERMNO_weight:=MKTCAP_LAG/sum(MKTCAP_LAG)]
 # data[,RET_W:=sum(PERMNO_weight*RET),by=.(PERMCO,key)]
 # data[,MKTCAP_LAG:=sum(MKTCAP_LAG),by=.(PERMCO,key)]
-# data=unique(data[,.(PERMNO,DATE,EXCHCD,MKTCAP,MKTCAP_LAG,RET,RET_W,key,Year,month,PERMCO)],by=c("PERMCO","key"))
+# data=unique(data[,.(PERMNO,DATE,EXCHCD,MKTCAP,MKTCAP_LAG,RET,RET_W,key,Year,month,PERMCO,PERMNO_weight)],by=c("PERMCO","key"))
 # setorder(data,PERMCO,key) 
 
 #============================================================================
 #============================================================================
 #============================================================================
 
-# Linking 
+# LINKING TABLE #  
 link = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compustat/link.xlsx"))
 link$LINKDT = as.Date(link$LINKDT,format="%Y%m%d")
 link$LINKENDDT = as.Date(link$LINKENDDT,format="%Y%m%d")
@@ -107,33 +105,29 @@ setkey(merged)
 merged = merged[(is.na(LINKDT) | merged$DATE>=merged$LINKDT) & (is.na(LINKENDDT) | DATE<=LINKENDDT)]
 setorder(merged,GVKEY,DATE)
 
+merged = merged[,LPERMNO:=NULL]
+merged = merged[,LINKTYPE:=NULL]
+
 #============================================================================
 #============================================================================
 #============================================================================
 
-# Multiple GVKEYS per PERMCO
+# Multiple GVKEYS per PERMCO # 
 
-# FIRST: if LC not LC linktype
+# FIRST # 
+# If 01 and not 01 LIID # 
 merged[,prob:=.N>1,by=.(PERMCO,DATE)]
-merged[,Good_match:=sum(LINKTYPE=='LC'),by=.(PERMCO,DATE)]
-merged = merged[!(prob==T & Good_match==T & LINKTYPE!='LC')]
+merged[,Good_match:=sum(LIID==01),by=.(PERMCO,DATE)]
+merged = merged[!(prob==TRUE & Good_match==TRUE & LIID!=01)]
 
-# SECOND: if P and not P linkprim
-merged[,prob:=.N>1,by=.(PERMCO,DATE)]
-merged[,Good_match:=sum(LINKTYPE=='P'),by=.(PERMCO,DATE)]
-merged = merged[!(prob==T & Good_match==T & LINKTYPE!='P')]
-
-# THIRD: if 1 and not 1 LIID 
-merged[,prob:=.N>1,by=.(PERMCO,DATE)]
-merged[,Good_match:=sum(LIID==1),by=.(PERMCO,DATE)]
-merged = merged[!(prob==T & Good_match==T & LIID!=1)]
-
-# FORTH: use the link that's current
+# SECOND # 
+# Use the link that's current # 
 merged[,prob:=.N>1,by=.(PERMCO,DATE)]
 merged[,Good_match:=sum(is.na(LINKENDDT)),by=.(PERMCO,DATE)]
-merged = merged[!(prob==T & Good_match==T & !is.na(LINKENDDT))]
+merged = merged[!(prob==TRUE & Good_match==TRUE & !is.na(LINKENDDT))]
 
-# FIFTH: use the link that's been around the longest
+# THIRD # 
+# Use the link that's been around the longest # 
 dates = as.data.table(merged$LINKENDDT) 
 dates = dates[-which(is.na(dates))]
 max(dates$V1) 
@@ -144,33 +138,31 @@ merged[,Good_match:=NULL]
 merged[is.na(LINKENDDT),LINKENDDT:=as.Date('2022-01-31','%Y-%m-%d')]
 merged[,Date_diff:=as.integer(LINKENDDT-LINKDT)]
 setorder(merged,PERMCO,DATE,Date_diff)
-merged[prob==T,Good_match:=Date_diff==Date_diff[.N],by=.(PERMCO,DATE)]
-merged = merged[!(prob==T & Good_match!=T)]
+merged[prob==TRUE,Good_match:=Date_diff==Date_diff[.N],by=.(PERMCO,DATE)]
+merged = merged[!(prob==TRUE & Good_match!=TRUE)]
 
-# SIXTH: use GVKEY that's been around the longest
+# FOURTH # 
+# Use GVKEY that's been around the longest #
 merged[,prob:=.N>1,by=.(PERMCO,DATE)]
 merged[,Good_match:=NULL]
 setorder(merged,GVKEY,LINKDT)
-merged[prob==T,start_Date:=LINKDT[1],by=.(GVKEY)]
+merged[prob==TRUE,start_Date:=LINKDT[1],by=.(GVKEY)]
 setorder(merged,GVKEY,LINKENDDT)
-merged[prob==T,end_Date:=LINKENDDT[.N],by=.(GVKEY)]
+merged[prob==TRUE,end_Date:=LINKENDDT[.N],by=.(GVKEY)]
 merged[,Date_diff:=as.integer(end_Date-start_Date)]
 setorder(merged,PERMCO,DATE,Date_diff)
-merged[prob==T,Good_match:=Date_diff==Date_diff[.N],by=.(PERMCO,DATE)]
-merged = merged[!(prob==T & Good_match!=T)]
+merged[prob==TRUE,Good_match:=Date_diff==Date_diff[.N],by=.(PERMCO,DATE)]
+merged = merged[!(prob==TRUE & Good_match!=TRUE)]
 
-# SEVENTH
+# FIFTH # 
 setorder(merged,PERMCO,DATE,GVKEY)
 merged = unique(merged,by=c('PERMCO','DATE'))
 
-# CLEAN UP
+# CLEAN UP # 
 if(nrow(unique(merged,by=c('GVKEY','DATE'))) !=nrow(merged) | nrow(unique(merged,by=c('PERMCO','DATE'))) !=nrow(merged)) {stop ('1. Monthly firm level returns.R: There is an issue with your merge between CRSP/Compustat')} 
 
 mergedlink = copy(merged)
-mergedlink[,conm:=NULL]
-mergedlink[,LINKPRIM:=NULL]
 mergedlink[,LIID:=NULL]
-mergedlink[,LINKTYPE:=NULL]
 mergedlink[,LINKDT:=NULL]
 mergedlink[,LINKENDDT:=NULL]
 mergedlink[,prob:=NULL]
@@ -181,449 +173,361 @@ mergedlink[,Good_match:=NULL]
 mergedlink[,special_key:=(mergedlink$Year+mergedlink$month/100)]
 
 #============================================================================
-#============================================================================
+#======================== IMPORT COMPUSTAT DATA =============================
 #============================================================================
 
-# Merge data with COMPUSTAT
-bm_data = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compustat/bm.xlsx"))
+be_data = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compustat/bm.xlsx"))
 profitability = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compustat/profitability.xlsx"))
 investment = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compustat/investment.xlsx"))
-bm_data$datadate = as.Date(bm_data$datadate,format="%Y%m%d")
-profitability$datadate = as.Date(profitability$datadate,format="%Y%m%d")
-investment$datadate = as.Date(investment$datadate,format="%Y%m%d")
 
-# Lagged assets 
-investment[,assets_t_min_1:=shift(assets)]
-investment[,assets_t_min_2:=shift(assets_t_min_1)]
-investment[,assets:=NULL]
+be_data$datadate = as.Date(be_data$datadate)
+profitability$datadate = as.Date(profitability$datadate)
+investment$datadate = as.Date(investment$datadate)
 
-bm_data[,Year:=year(datadate)]
-bm_data[,month:=month(datadate)]
-bm_data[,key:=paste(Year,month)]
+# Correct industry and data format # 
+be_data <- be_data %>%
+  filter(indfmt == 'INDL' & datafmt == 'STD') %>%
+  select(-c(indfmt, datafmt))
 
-profitability[,Year:=year(datadate)]
-profitability[,month:=month(datadate)]
-profitability[,key:=paste(Year,month)]
+profitability <- profitability %>%
+  filter(indfmt == 'INDL' & datafmt == 'STD') %>%
+  select(-c(indfmt, datafmt))
 
-investment[,Year:=year(datadate)]
-investment[,month:=month(datadate)]
-investment[,key:=paste(Year,month)]
+investment <- investment %>%
+  filter(indfmt == 'INDL' & datafmt == 'STD') %>%
+  select(-c(indfmt, datafmt))
 
-setkey(bm_data,key)
-setkey(profitability,key)
-setkey(investment,key)
+# Keep only distinct observations # 
+be_data = distinct(be_data)
+profitability = distinct(profitability)
+investment = distinct(investment)
 
-bm_data[,special_key:=(bm_data$Year+bm$month/100)]
-profitability[,special_key:=(profitability$Year+profitability$month/100)]
-investment[,special_key:=(investment$Year+investment$month/100)]
-
-data1 = merge(bm_data,profitability,by=c('GVKEY', 'key'),all.x=TRUE)
-data2 = merge(data1,investment,by=c('GVKEY', 'key'),all.x=TRUE)
-
-data2[,Year.x:=NULL]
-data2[,Year.y:=NULL]
-data2[,month.x:=NULL]
-data2[,month.y:=NULL]
-data2[,datadate.y:=NULL]
-data2[,fiscaldate.x:=NULL]
-data2[,fiscaldate.y:=NULL]
-data2[,special_key.x:=NULL]
-data2[,LIID.y:=NULL]
-
-data = merge(mergedlink,data2,by=c('GVKEY','key'),all.x=TRUE)
-setorderv(data,c("GVKEY","special_key.y"))
+# be_data[,Year:=year(datadate)]
+# be_data[,month:=month(datadate)]
+# be_data[,key:=paste(Year,month)]
 
 #============================================================================
 #============================================================================
 #============================================================================
 
-# Shareholder's Equity (SHE) 
-data[,SHE:=ifelse(!is.na(seq),seq,ifelse(!is.na(ceq+pstk),ceq+pstk,ifelse(!is.na(at+lt+mib),at-lt-mib,at-lt)))] 
+# MERGE COMPUSTAT DATA # 
+compustat_merged = merge(be_data,investment,by.x = c('GVKEY','datadate'),by.y = c('GVKEY', 'datadate'),allow.cartesian = T)
 
-# Preferred Stock (PS)
-data[,PS:=ifelse(!is.na(pstkrv),pstkrv,ifelse(!is.na(pstkl),pstkl,pstk))]
+compustat_merged[,fiscaldate.y:=NULL]
+compustat_merged[,LIID.y:=NULL]
+setnames(compustat_merged, 'fiscaldate.x', 'fiscaldate')
+setnames(compustat_merged, 'LIID.x', 'LIID')
 
-# Book Equity (BE) = Common Equity per definition 
-data[,BE:=SHE-PS]
+compustat = merge(compustat_merged, profitability, by.x = c('GVKEY','datadate'),by.y = c('GVKEY', 'datadate'),allow.cartesian = T)
 
-# Investment (INV)
-data[,INV:=(assets_t_min_2-assets_t_min_1)/assets_t_min_2]
+compustat[,fiscaldate.y:=NULL]
+compustat[,LIID.y:=NULL]
+setnames(compustat, 'fiscaldate.x', 'fiscaldate')
+setnames(compustat, 'LIID.x', 'LIID')
 
-#============================================================================
-#============================================================================
-#============================================================================
+# CLEAN UP # 
+compustat$expense[is.na(compustat$expense)] <- 0
+compustat$interest[is.na(compustat$interest)] <- 0
+compustat$rev[is.na(compustat$rev)] <- 0
+compustat$cogs[is.na(compustat$cogs)] <- 0
 
-# Here I also define 10 decile for size portfolio
-ff = as.data.table(read.csv("Documents/Master/Master Thesis/FF_factors/fama.csv", header = FALSE, sep = ","))
-ff = ff[-1,]
-ff = ff[-1,]
-colnames(ff)=c("date","mktrf","SMB","HML","RMW", "CMA", "RF")
-ff = ff[-1,]
-ff = ff[324:630,] # ENDRE DENNE MED NYTT DATASETT 
-for(i in 2:7)
-{
-  ff[[i]]=as.numeric(as.character(ff[[i]]))
-}
+rm(be_data, investment, profitability, compustat_merged)
 
-ff[[1]] = as.character(ff[[1]])
-ff[[1]]=as.Date(paste(ff[[1]],"01",sep=""),format="%Y%m%d")
-setnames(ff,"date","date")
-setkey(ff,date)
+compustat[,Year:=year(datadate)]
+compustat[,month:=month(datadate)]
+compustat[,key:=paste(Year,month)]
 
-ff[,Year:=year(date)]
-ff[,month:=month(date)]
-ff[,key:=paste(Year,month)]
-
-ff[,mktrf:=mktrf/100]
-ff[,SMB:=SMB/100]
-ff[,HML:=HML/100]
-ff[,SMB:=RMW/100]
-ff[,HML:=CMA/100]
-ff[,RF:=RF/100]
-
-setkey(data,key)
-setkey(ff,key)
-a = merge(data,ff,by="key",all.x=TRUE)
-setorderv(a,c("GVKEY","special_key.x"))
-
-a[,DATE:=NULL]
-# a[,mktrf:=NULL]
-a[,HML:=NULL]
-a[,SMB:=NULL]
-a[,RMW:=NULL]
-a[,CMA:=NULL]
-a[,month.x:=NULL]
-a[,Year.x:=NULL]
-
-# Return to excess return
-a[,ret_rf:=RET-RF] # HER BRUKER JEG RET UVEKTET - RIKTIG?  
+compustat[,special_key:=(compustat$Year+compustat$month/100)]
 
 #============================================================================
 #============================================================================
 #============================================================================
 
-data = copy(a)
-data = data[, if (.N > 12) .SD, by = GVKEY]
+# VARIABLE COMPUTATIONS # 
 
-library(zoo)
-library(dplyr)
+# SHAREHOLDERS'S EQUITY (SHE) # 
+compustat[,SHE:=ifelse(!is.na(seq),seq,ifelse(!is.na(ceq+pstk),ceq+pstk,ifelse(!is.na(at+lt+mib),at-lt-mib,at-lt)))] 
 
-func <- function(z)
-{
-  return(prod(1+z[1:12])-1)
-}
+# PREFERRED STOCK (PS) # 
+compustat[,PS:=ifelse(!is.na(pstkrv),pstkrv,ifelse(!is.na(pstkl),pstkl,pstk))]
 
-data[, rank_ret := rollapplyr(ret_rf, width = 13, FUN = func, fill = NA, align="left"), by = GVKEY]
+# BOOK EQUITY (BE) = Common Equity per definition # 
+compustat[,BE:=SHE-PS]
 
-#============================================================================
-#============================================================================
-#============================================================================
+# CLEAN UP # 
+compustat = compustat[,at:=NULL]
+compustat = compustat[,ceq:=NULL]
+compustat = compustat[,lt:=NULL]
+compustat = compustat[,mib:=NULL]
+compustat = compustat[,pstk:=NULL]
+compustat = compustat[,pstkl:=NULL]
+compustat = compustat[,pstkrv:=NULL]
+compustat = compustat[,seq:=NULL]
 
-library(e1071)
-data[, `:=`(decile_month, cut(MKTCAP, breaks = quantile(MKTCAP[which(EXCHCD==1)],probs = c(0,0.5,1), na.rm = TRUE), include.lowest = TRUE, labels = FALSE)),by = key]
-data[, `:=`(decile_month_help, cut(MKTCAP, breaks = quantile(MKTCAP,probs = c(0,0.5,1), na.rm = TRUE), include.lowest = TRUE, labels = FALSE)),by = key]
-data[,smb_decile:=ifelse(is.na(decile_month) & decile_month_help==1,1,ifelse(is.na(decile_month) & decile_month_help==2,2,decile_month))]
+compustat = compustat[,SHE:=NULL]
+compustat = compustat[,PS:=NULL]
 
-data = data[,decile_month:=NULL]
-data = data[,decile_month_help:=NULL]
+# INVESTMENT (INV) # 
+compustat[,assets_t_min_1:=shift(assets)]
+compustat[,assets_t_min_2:=shift(assets_t_min_1)]
+compustat[,INV:=(assets_t_min_2-assets_t_min_1)/assets_t_min_2]
 
-# setnames(data,"date.x","date")
-# setnames(data,"Year.x","Year")
-# setnames(data,"month.x","month")
+# CLEAN UP # 
+compustat = compustat[,assets:=NULL]
+compustat = compustat[,assets_t_min_1:=NULL]
+compustat = compustat[,assets_t_min_2:=NULL]
 
-#============================================================================
-#============================================================================
-#============================================================================
+# PROFITABILITY (OP) # 
+# compustat[,OP:=ifelse(!is.na(rev+cogs+expense+interest+lagged_BE_by_year),(rev-cogs-expense-interest)/lagged_BE_by_year,NA)]
 
-
-#################### HERFRA OG NED MÅ DET RYDDES!!! ##########################
-
-# Create investment (INV) 
-data[,INV:=(assets_t_min_2-assets_t_min_1)/assets_t_min_2]
-
-data[,smb_june_decile:=ifelse(month==6,smb_decile,NA)] # Is it month 7 or month 6? check later
-
-# Create lagged BE
-new = data[,c("GVKEY","key","date","EXCHCD","MKTCAP_LAG","RET","BE","Year","month")]
-new = na.omit(new)
-new[,lagged_BE_by_year:=shift(BE),by=GVKEY]
-new = new[,c("GVKEY","date","key","Year","EXCHCD","lagged_BE_by_year")]
-
-# Create profitability (OP) 
-data[,OP:=ifelse(!is.na(rev+cogs+expense+interest),(rev-cogs-expense-interest)/lagged_BE_by_year,NA)]
-
-data = merge(data,new,by=c('GVKEY','key'),allow.cartesian = TRUE)
-setorderv(data,c("GVKEY","special_key"))
-
-# Create December ME
-new2 = data[month==12,c("GVKEY","key","date.x","EXCHCD.x","MKTCAP_LAG","RET","Year.x","month")]
-new2[,lagged_december_ME:=shift(MKTCAP_LAG),by=GVKEY]
-new2 = new2[,c("GVKEY","key","Year.x","EXCHCD.x","lagged_december_ME")]
-new2 = na.omit(new2)
-colnames(new2) = c("GVKEY","key","Year","EXCHCD","lagged_december_ME")
-
-new3 = data[month==6,c("GVKEY","key","Year.x","rank_ret","smb_decile","EXCHCD.x","MKTCAP","MKTCAP_LAG")]
-colnames(new3) = c("GVKEY","key","Year","rank_ret","smb_decile","EXCHCD","MKTCAP","MKTCAP_LAG")
-
-# Create BM 
-t = merge(new,new2,by=c('GVKEY','Year'), allow.cartesian = TRUE)
-t[,key.y:=NULL]
-setorderv(t,c("GVKEY","Year"))
-t[,lagged_BE_by_year:=lagged_BE_by_year*1000]
-t[,BM:=lagged_BE_by_year/lagged_december_ME]
-t = na.omit(t)
-
-# data = data[,c("GVKEY","key","PERMNO", "PERMCO", "DATE","EXCHCD","MKTCAP","MKTCAP_LAG","RET","Year.x","month.x","special_key.x", "OP", "INV")]
+# CLEAN UP # 
+# compustat = compustat[,rev:=NULL]
+# compustat = compustat[,cogs:=NULL]
+# compustat = compustat[,expense:=NULL]
+# compustat = compustat[,interest:=NULL]
 
 #============================================================================
 #============================================================================
 #============================================================================
 
-# Merge
-setnames(t,"key.x","key")
-t = merge(t,new3,by=c('GVKEY','Year'))
-t = na.omit(t)
-setorderv(t,c("GVKEY","Year"))
+# MERGE CRSP AND COMPUSTAT DATA # 
+CRSP_compustat = merge(mergedlink,compustat,by=c('GVKEY','key'),all.x=TRUE)
 
-t[,lagged_BE_by_year:=NULL]
-t[,lagged_december_ME:=NULL]
-t[,assets_t_min_1:=NULL]
-t[,assets_t_min_2:=NULL]
-t[,key.x:=NULL]
-setnames(t,"key.y","key")
-setnames(t,"smb_decile","size_decile")
-t[,EXCHCD.x:=NULL]
-t[,EXCHCD.y:=NULL]
+# CLEAN UP # 
+CRSP_compustat[,Year.y:=NULL]
+CRSP_compustat[,month.y:=NULL]
+CRSP_compustat[,special_key.y:=NULL]
+CRSP_compustat[,datadate:=NULL]
+CRSP_compustat[,fiscaldate:=NULL]
+CRSP_compustat[,LIID:=NULL]
+CRSP_compustat[,PERMCO:=NULL]
+CRSP_compustat[,PERMNO:=NULL]
+CRSP_compustat[,Year:=NULL]
+CRSP_compustat[,month:=NULL]
 
-t[, `:=`(bm_decile, cut(BM, breaks = quantile(BM[which(EXCHCD==1)],probs = c(0,0.3,0.7,1), na.rm = TRUE), include.lowest = TRUE, labels = FALSE)),by = key]
-t = na.omit(t)
+setnames(CRSP_compustat, 'special_key.x', 'special_key')
 
-# Exclude negative BE
-t = t[which(BM>0),]
+setorderv(CRSP_compustat,c("GVKEY","special_key"))
 
-# Subset by Year
-t = t[Year>=1990,]
+# CRSP_compustat = CRSP_compustat[,c("GVKEY","key","DATE","EXCHCD","MKTCAP","RET","Year","month","special_key","datadate","fiscaldate","BE")]
 
-tt = copy(t)
+# Determine reference date for matching (i.e., June of next calendar year) #  
+CRSP_compustat = CRSP_compustat[,reference_date:=paste0(year(DATE) + 1, "-06-01")]
+
+#============================================================================
+#========================== SIZE FORMED ON BM ===============================
+#============================================================================
+
+# CONSTRUCT STOCK SAMPLE # 
+
+# Select relevant variables # 
+stocks_BM <- CRSP_compustat %>%
+  select(GVKEY, EXCHCD,DATE, RET, MKTCAP, BE, reference_date) %>%
+  na.omit()
+
+# Add ME data from the end of year t-1 which is used for BM ratio in June of year t # 
+stocks_me <- stocks_BM %>% 
+  filter(month(DATE) == 12) %>%
+  mutate(reference_date = paste0(year(DATE) + 1, "-06-01")) %>%
+  select(GVKEY, reference_date, DATE, me = MKTCAP)
+
+# Merge BE and ME data 
+stocks_BM = merge(stocks_BM,stocks_me,by.x = c('GVKEY','reference_date'),by.y = c('GVKEY', 'reference_date'), allow.cartesian = T)
+
+# Clean up # 
+stocks_BM[,DATE.y:=NULL]
+setnames(stocks_BM, 'DATE.x', 'DATE')
+
+# Multiply BE with 1000 to be consistent with ME data # 
+stocks_BM$BE = stocks_BM$BE*1000
+
+# Compute BM # 
+stocks_BM$BM = stocks_BM$BE / stocks_BM$me
+
+# Only keep stocks that have all the necessary data (i.e., me data for December t-1, and June t, and BE for t-1) # 
+stocks_BM = na.omit(stocks_BM)
 
 #============================================================================
 #============================================================================
 #============================================================================
 
-# Here I calculate 10 deciles for BM portfolios
-t = copy(tt)
-t[, `:=`(decile_month, cut(BM, breaks = quantile(BM[which(EXCHCD==1)],probs = c(0:10)/10, na.rm = TRUE), include.lowest = TRUE, labels = FALSE)),by = key]
-t[, `:=`(decile_month_help, cut(BM, breaks = quantile(BM,probs = c(0:10)/10, na.rm = TRUE), include.lowest = TRUE, labels = FALSE)),by = key]
-t[,new_BM_decile:=ifelse(is.na(decile_month) & decile_month_help<=5,1,ifelse(is.na(decile_month) & decile_month_help>5,10,decile_month))]
+# SIZE SORTING FOR SMB_BM # 
 
-t = t[,decile_month:=NULL]
-t = t[,decile_month_help:=NULL]
+# In June of each year, all NYSE stocks are ranked on size to get the median # 
+size_breakpoints <- stocks_BM %>% 
+  filter(EXCHCD == 1) %>%
+  select(reference_date, MKTCAP) %>%
+  group_by(reference_date) %>%
+  summarize(size_median = median(MKTCAP)) 
 
-#============================================================================
-#============================================================================
-#============================================================================
+# Also in June, all stocks are sorted into two portfolios # 
+size_sort <- stocks_BM %>%
+  left_join(size_breakpoints, by = "reference_date") %>%
+  mutate(size_portfolio = case_when(MKTCAP > size_median ~ "B",
+                                    MKTCAP <= size_median ~ "S", 
+                                    TRUE ~ as.character(NA))) %>%
+  select(GVKEY, reference_date, size_portfolio)
 
-xx = t[,c("GVKEY","key","EXCHCD","MKTCAP","MKTCAP_LAG","rank_ret","Year","new_BM_decile")]
-xx = na.omit(xx)
-xx[,weight := MKTCAP/sum(MKTCAP), by = .(key,new_BM_decile)]
-
-setkey(xx,key)
-z = xx[, weighted.mean(rank_ret,weight), by = .(key,new_BM_decile,Year)] # Her har vi mistet 1990 og 2015 - se nærmere på dette 
-
-setorderv(z,c("Year","new_BM_decile"))
-
-setnames(z,"V1","return_decile")
+# Add size portfolio assignment back to stock data # 
+stocks_BM <- stocks_BM %>% 
+  left_join(size_sort, by = c("GVKEY", "reference_date"))
 
 #============================================================================
 #============================================================================
 #============================================================================
 
-fin1 = matrix(0,nrow=4,ncol=10)
-table = z
-table_bm = table
-for (i in 1:10)
-{
-  fin1[1,i]=mean(table$return_decile[which(table$new_BM_decile==i)])
-  fin1[2,i]=sd(table$return_decile[which(table$new_BM_decile==i)])
-  fin1[3,i]=fin1[1,i]/fin1[2,i]
-  fin1[4,i]=skewness(table$return_decile[which(table$new_BM_decile==i)])
-}
+# VALUE SORTING # 
 
-rownames(fin1) = c('mean','sigma','SR','SK(m)')
-colnames(fin1) = c(paste0('Decile ',seq(1,10,1)))
-fin1
+# Calculate value breakpoints using NYSE stocks # 
+value_breakpoints <- stocks_BM %>% 
+  filter(EXCHCD == 1) %>% 
+  select(reference_date, BM) %>% 
+  group_by(reference_date) %>% 
+  summarize(value_q30 = quantile(BM, 0.3), 
+            value_q70 = quantile(BM, 0.7))
 
-#============================================================================
-#============================================================================
-#============================================================================
+# Also in June, all stocks are sorted into three portfolios 
+value_sorts <- stocks_BM %>% 
+  left_join(value_breakpoints, by = "reference_date") %>%
+  mutate(value_portfolio = case_when(BM > value_q70 ~"V",
+                                     BM <= value_q70 & BM > value_q30 ~ "N",
+                                     BM <= value_q30 ~"G",
+                                     TRUE ~ as.character(NA))) %>%
+  select(GVKEY, reference_date, value_portfolio)
 
-t = copy(tt)
-t[, `:=`(decile_month, cut(MKTCAP, breaks = quantile(MKTCAP[which(EXCHCD==1)],probs = c(0:10)/10, na.rm = TRUE), include.lowest = TRUE, labels = FALSE)),by = key]
-t[, `:=`(decile_month_help, cut(MKTCAP, breaks = quantile(MKTCAP,probs = c(0:10)/10, na.rm = TRUE), include.lowest = TRUE, labels = FALSE)),by = key]
-t[,new_size_decile:=ifelse(is.na(decile_month) & decile_month_help<=5,1,ifelse(is.na(decile_month) & decile_month_help>5,10,decile_month))]
-
-t = t[,decile_month:=NULL]
-t = t[,decile_month_help:=NULL]
+# Add value portfolio assignment back to stock data # 
+stocks_BM <- stocks_BM %>% 
+  left_join(value_sorts, by = c("GVKEY", "reference_date"))
 
 #============================================================================
 #============================================================================
 #============================================================================
 
-xx = t[,c("GVKEY","key","EXCHCD","MKTCAP","MKTCAP_LAG","rank_ret","Year","new_size_decile")]
-xx = na.omit(xx)
-xx[,weight := MKTCAP/sum(MKTCAP), by = .(key,new_size_decile)]
+# CONSTRUCT FACTOR PORTOFLIOS # 
 
-setkey(xx,key)
-z = xx[, weighted.mean(rank_ret,weight), by = .(key,new_size_decile,Year)]
+# SMB_BM_portfolios # 
+SMB_BM_portfolios <- stocks_BM %>% 
+  group_by(reference_date, size_portfolio, value_portfolio) %>% 
+  summarize(ret_vw = weighted.mean(RET, MKTCAP)) %>% # NB: MKTCAP is the "weight" to get VW rets 
+  ungroup() %>% 
+  mutate(portfolio = paste0(size_portfolio, "/", value_portfolio))
 
-setorderv(z,c("Year","new_size_decile"))
+factors_BM <- SMB_BM_portfolios %>%
+  group_by(reference_date) %>%
+  summarize(SMB_BM = mean(ret_vw[portfolio %in% c("S/V", "S/N", "S/G")]) - 
+              mean(ret_vw[portfolio %in% c("B/V", "B/N", "B/G")]),
+            HML = mean(ret_vw[portfolio %in% c("S/V", "B/V")]) - 
+              mean(ret_vw[portfolio %in% c("S/G", "B/G")]))
 
-setnames(z,"V1","return_decile")
+#============================================================================
+#========================== SIZE FORMED ON OP ===============================
+#============================================================================
+
+# CONSTRUCT STOCK SAMPLE # 
+
+# Select relevant variables # 
+stocks_OP <- CRSP_compustat %>%
+  select(GVKEY, EXCHCD,DATE, RET, MKTCAP, BE, rev, cogs, interest, expense, reference_date) %>%
+  na.omit()
+
+# Add ME data from the end of year t-1 which is used for BM ratio in June of year t # 
+stocks_me <- stocks_OP %>% 
+  filter(month(DATE) == 12) %>%
+  mutate(reference_date = paste0(year(DATE) + 1, "-06-01")) %>%
+  select(GVKEY, reference_date, DATE, me = MKTCAP)
+
+# Merge BE and ME data 
+stocks_OP = merge(stocks_OP,stocks_me,by.x = c('GVKEY','reference_date'),by.y = c('GVKEY', 'reference_date'), allow.cartesian = T)
+
+# Clean up # 
+stocks_OP[,DATE.y:=NULL]
+setnames(stocks_OP, 'DATE.x', 'DATE')
+
+# Compute OP # 
+stocks_OP[,OP:=ifelse(!is.na(rev+cogs+expense+interest),(rev-cogs-expense-interest)/BE,NA)]
+
+stocks_OP[,rev:=NULL]
+stocks_OP[,cogs:=NULL]
+stocks_OP[,interest:=NULL]
+stocks_OP[,expense:=NULL]
+stocks_OP[,BE:=NULL]
+
+# Only keep stocks that have all the necessary data (i.e., me data for December t-1, and June t, and BE for t-1) # 
+stocks_BM = na.omit(stocks_BM)
 
 #============================================================================
 #============================================================================
 #============================================================================
 
-fin11 = matrix(0,nrow=4,ncol=10)
-table = z
-table_me = table
-for (i in 1:10)
-{
-  fin11[1,i]=mean(table$return_decile[which(table$new_size_decile==i)])
-  fin11[2,i]=sd(table$return_decile[which(table$new_size_decile==i)])
-  fin11[3,i]=fin11[1,i]/fin11[2,i]
-  fin11[4,i]=skewness(table$return_decile[which(table$new_size_decile==i)])
-}
+# SIZE SORTING FOR SMB_OP # 
 
-rownames(fin11) = c('mean','sigma','SR','SK(m)')
-colnames(fin11) = c(paste0('Decile ',seq(1,10,1)))
-fin11
+# In June of each year, all NYSE stocks are ranked on size to get the median # 
+size_breakpoints_OP <- stocks_OP %>% 
+  filter(EXCHCD == 1) %>%
+  select(reference_date, MKTCAP) %>%
+  group_by(reference_date) %>%
+  summarize(size_median = median(MKTCAP)) 
 
-#============================================================================
-#============================================================================
-#============================================================================
+# Also in June, all stocks are sorted into two portfolios # 
+size_sort_OP <- stocks_OP %>%
+  left_join(size_breakpoints_OP, by = "reference_date") %>%
+  mutate(size_portfolio = case_when(MKTCAP > size_median ~ "B",
+                                    MKTCAP <= size_median ~ "S", 
+                                    TRUE ~ as.character(NA))) %>%
+  select(GVKEY, reference_date, size_portfolio)
 
-# Create 6 portfolios
-
-t = copy(tt)
-
-t[,weight := MKTCAP/sum(MKTCAP), by = .(key,Year,size_decile,bm_decile)]
-
-# Check that weights are summing up to 1: 
-# dd=t[,sum(weight),by=.(size_decile,bm_decile,Year)]
-
-setkey(t,key)
-z = t[, weighted.mean(rank_ret,weight), by = .(key,Year,size_decile,bm_decile)]
-setnames(z,"V1","return_decile")
-setorderv(z,c("Year","size_decile","bm_decile"))
+# Add size portfolio assignment back to stock data # 
+stocks_OP <- stocks_OP %>% 
+  left_join(size_sort_OP, by = c("GVKEY", "reference_date"))
 
 #============================================================================
 #============================================================================
 #============================================================================
 
-w = copy(z)
+# VALUE SORTING # 
 
-z = z[,mean(return_decile),by=.(size_decile,bm_decile)]
-rownames(z) = c("small_growth","small_neutral","small_value","big_growth","big_neutral","big_value")
-z
+# Calculate value breakpoints using NYSE stocks # 
+value_breakpoints_OP <- stocks_OP %>% 
+  filter(EXCHCD == 1) %>% 
+  select(reference_date, OP) %>% 
+  group_by(reference_date) %>% 
+  summarize(value_q30 = quantile(OP, 0.3), 
+            value_q70 = quantile(OP, 0.7))
 
-#============================================================================
-#============================================================================
-#============================================================================
+# Also in June, all stocks are sorted into three portfolios 
+value_sorts_OP <- stocks_OP %>% 
+  left_join(value_breakpoints_OP, by = "reference_date") %>%
+  mutate(profit_portfolio = case_when(OP > value_q70 ~"R",
+                                     OP <= value_q70 & OP > value_q30 ~ "N",
+                                     OP <= value_q30 ~"W",
+                                     TRUE ~ as.character(NA))) %>%
+  select(GVKEY, reference_date, profit_portfolio)
 
-# Find HML and SMB
-
-# Working with w that has 270 observations (annual data) - we have 144
-w[,port:="c"]
-for(i in 1:144)
-{
-  if(w$size_decile[i]==1 & w$bm_decile[i]==1)
-  {
-    w$port[i]="SL"
-  }
-  if(w$size_decile[i]==1 & w$bm_decile[i]==2)
-  {
-    w$port[i]="SM"
-  }
-  if(w$size_decile[i]==1 & w$bm_decile[i]==3)
-  {
-    w$port[i]="SH"
-  }
-  if(w$size_decile[i]==2 & w$bm_decile[i]==1)
-  {
-    w$port[i]="BL"
-  }
-  if(w$size_decile[i]==2 & w$bm_decile[i]==2)
-  {
-    w$port[i]="BM"
-  }
-  if(w$size_decile[i]==2 & w$bm_decile[i]==3)
-  {
-    w$port[i]="BH"
-  }
-}
-
-R_SL = w$return_decile[which(w$port=="SL")]
-R_SM = w$return_decile[which(w$port=="SM")]
-R_SH = w$return_decile[which(w$port=="SH")]
-R_BL = w$return_decile[which(w$port=="BL")]
-R_BM = w$return_decile[which(w$port=="BM")]
-R_BH = w$return_decile[which(w$port=="BH")]
+# Add value portfolio assignment back to stock data # 
+stocks_OP <- stocks_OP %>% 
+  left_join(value_sorts_OP, by = c("GVKEY", "reference_date"))
 
 #============================================================================
 #============================================================================
 #============================================================================
 
-# Create SMB (small minus big)
-RS = (1/3)*(R_SL + R_SM + R_SH)
-RB = (1/3)*(R_BL + R_BM + R_BH)
-SMB = RS - RB
+# CONSTRUCT FACTOR PORTOFLIOS # 
 
-# Create HML (high minus low)
-RH = 0.5*(R_SH + R_BH)
-RL = 0.5*(R_SL + R_BL)
-HML = RH - RL
+# SMB_OP_portfolios # 
+SMB_OP_portfolios <- stocks_OP %>% 
+  group_by(reference_date, size_portfolio, profit_portfolio) %>% 
+  summarize(ret_vw = weighted.mean(RET, MKTCAP)) %>% # NB: MKTCAP is the "weight" to get VW rets 
+  ungroup() %>% 
+  mutate(portfolio = paste0(size_portfolio, "/", profit_portfolio))
 
-# Create RMW (robust minus weak)
-
-# Create CMA (conservative minus aggresive)
-
-#============================================================================
-#============================================================================
-#============================================================================
-
-fin111 = matrix(0,nrow=4,ncol=8)
-table=data.frame(R_SL,R_SM,R_SH,R_BL,R_BM,R_BH,SMB,HML)
-table_six = table
-for (i in 1:8)
-{
-  fin111[1,i]=mean(table[[i]])
-  fin111[2,i]=sd(table[[i]])
-  fin111[3,i]=fin111[1,i]/fin111[2,i]
-  fin111[4,i]=skewness(table[[i]])
-}
-
-rownames(fin111) = c('mean','sigma','SR','SK(m)')
-colnames(fin111) = c(colnames(table))
-fin111
+factors_OP <- SMB_OP_portfolios %>%
+  group_by(reference_date) %>%
+  summarize(SMB_OP = mean(ret_vw[portfolio %in% c("S/R", "S/N", "S/W")]) - 
+              mean(ret_vw[portfolio %in% c("B/R", "B/N", "B/W")]),
+            RMW = mean(ret_vw[portfolio %in% c("S/R", "B/R")]) - 
+              mean(ret_vw[portfolio %in% c("S/W", "B/W")]))
 
 #============================================================================
 #============================================================================
 #============================================================================
-
-# Correlation
-
-library(readxl)
-fama_size_deciles = as.data.table(read_excel("C:\\Users\\Rustem\\Desktop\\Quantitative Asset Management, Bernard\\hw4\\size_deciles.xlsx"))
-fama_size_deciles = fama_size_deciles[X__1>=1990 & X__1<2015,]
-fama_size_deciles = fama_size_deciles[,c(11:20)]
-fama_size_deciles = fama_size_deciles/100
-
-
-
-
-
-
-
-
 
