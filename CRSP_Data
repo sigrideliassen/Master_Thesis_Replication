@@ -896,5 +896,33 @@ factors <- factors %>%
 factors = unique(factors)
 
 #============================================================================
+#============================ LHS PORTFOLIO =================================
+#============================================================================
+
+# Calculate excess return 
+LHS_portfolios = copy(CRSP_compustat)
+
+LHS_portfolios <- LHS_portfolios %>% 
+  select(GVKEY, DATE, RET)
+
+# Regression preparation # 
+regression_factors <- copy(factors)
+
+regression_factors <- LHS_portfolios %>% 
+  left_join(regression_factors, by = "DATE")
+  
+#============================================================================
 #============================== REGRESSION ==================================
 #============================================================================
+
+# Extract FF factors # 
+MKT <- regression_factors[,4]
+SMB <- regression_factors[,5]
+HML <- regression_factors[,6]
+RMW <- regression_factors[,7]
+CMA <- regression_factors[,8]
+
+# Run regression # 
+FF_regression <- lm(RET ~ MKT + SMB + HML + RMW + CMA, data = regression_factors)
+
+summary(FF_regression)
