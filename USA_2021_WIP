@@ -9,6 +9,9 @@ library(dbplyr)
 #============================================================================
 
 # Log into WRDS database with your account and password # 
+# User Account: sigridmse 
+# Password: BamseBonoCase123 
+
 wrds <- dbConnect(
   Postgres(),
   host = "wrds-pgdata.wharton.upenn.edu",
@@ -622,3 +625,28 @@ cma_std = sd(five_factors_monthly$cma_replicated)
 # Computing factor t-means # 
 five_factors_monthly <- five_factors_monthly %>% 
   select(mkt_excess, smb_replicated, hml_replicated, rmw_replicated, cma_replicated)
+
+#============================================================================
+#======================== FACTOR SPANNING TEST  =============================
+#============================================================================
+
+# Run HML on the remaining four factors # 
+hml_on_factors <- lm(hml_replicated ~ mkt_excess + smb_replicated + rmw_replicated + cma_replicated, data = five_factors_monthly)
+summary(hml_on_factors)
+
+# Run MKT on the remaining four factors # 
+mkt_on_factors <- lm(mkt_excess ~ hml_replicated + smb_replicated + rmw_replicated + cma_replicated, data = five_factors_monthly)
+summary(mkt_on_factors)
+
+# Run SMB on the remaining four factors # 
+smb_on_factors <- lm(smb_replicated ~ mkt_excess + hml_replicated + rmw_replicated + cma_replicated, data = five_factors_monthly)
+summary(smb_on_factors)
+
+# Run RMW on the remaining four factors # 
+rmw_on_factors <- lm(rmw_replicated ~ mkt_excess + smb_replicated + hml_replicated + cma_replicated, data = five_factors_monthly)
+summary(rmw_on_factors)
+
+# Run CMA on the remaining four factors # 
+cma_on_factors <- lm(cma_replicated ~ mkt_excess + smb_replicated + rmw_replicated + hml_replicated, data = five_factors_monthly)
+summary(cma_on_factors)
+
