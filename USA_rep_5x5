@@ -1,0 +1,560 @@
+library(RPostgres)
+library(data.table)
+library(zoo)
+library(dplyr)
+library(dbplyr)
+
+#============================================================================
+#============================= ACCESSING WRDS ===============================
+#============================================================================
+
+wrds <- dbConnect(
+  Postgres(),
+  host = "wrds-pgdata.wharton.upenn.edu",
+  dbname = "wrds",
+  port = 9737,
+  sslmode = "require",
+  user = rstudioapi::askForPassword("User Account"),
+  password = rstudioapi::askForPassword("Password")
+)
+
+#============================================================================
+#============================ IMPORT CRSP DATA ==============================
+#============================================================================
+
+# FIRST TABLE: CRSP Monthly Security File # 
+msf_db <- tbl(wrds, in_schema("crsp", "msf"))
+# msf_db
+
+# SECOND TABLE: Identifying Information # 
+msenames_db <- tbl(wrds, in_schema("crsp", "msenames"))
+# msenames_db
+
+# THIRD TABLE: Delisting Information # 
+msedelist_db <- tbl(wrds, in_schema("crsp", "msedelist"))
+# msedelist_db
+
+# Fetch the data we want to put into our local database # 
+# Filter and data selection criteria to narrow down the data of interest # 
+
+# 1: Keep only data in the time windows of interest # 
+start_date = "1990-06-30"
+end_date = "2015-12-31"
+
+# 2: Keep only US-listed stocks as identified via share code 10 and 11 # 
+# 3: Keep only months with valid permno-specific information # 
+
+crsp_monthly <- msf_db %>%
+  filter(date >= start_date & date <= end_date) %>%
+  inner_join(msenames_db %>%
+               filter(shrcd %in% c(10, 11)) %>%
+               select(permno, exchcd, siccd, namedt, nameendt), by = c("permno")) %>%
+  filter(date >= namedt & date <= nameendt) %>%
+  mutate(month = floor_date(date, "month")) %>%
+  left_join(msedelist_db %>%
+              select(permno, dlstdt, dlret, dlstcd) %>%
+              mutate(month = floor_date(dlstdt, "month")), by = c("permno", "month")) %>%
+  select(
+    permno, # Security identifier
+    date, # Date of the observation
+    month, # Month of the observation
+    ret, # Return
+    shrout, # Shares outstanding (in thousands)
+    altprc, # Last traded price in a month
+    exchcd, # Exchange code
+    siccd, # Industry code
+    dlret, # Delisting return
+    dlstcd # Delisting code
+  ) %>%
+  mutate(
+    month = as.Date(month),
+    shrout = shrout * 1000
+  ) %>%
+  collect()
+
+#============================================================================
+#============================ CALCULATE MKTCAP ==============================
+#============================================================================
+
+# Calculate market capitalization # 
+crsp_monthly <- crsp_monthly %>%
+  mutate(
+    mktcap = abs(shrout * altprc) / 1000000,
+    mktcap = if_else(mktcap == 0, as.numeric(NA), mktcap)
+  )
+
+# Calculate one-month lagged market capitalization # 
+# Use lagged market cap to compute VW portfolio returns # 
+library(lubridate)
+library(dplyr)
+
+# Add one month to each observation # 
+mktcap_lag <- crsp_monthly %>%
+  mutate(month = month %m+% months(1)) %>% 
+  select(permno, month, mktcap_lag = mktcap)
+
+# Join lagged market cap into our data set # 
+crsp_monthly <- crsp_monthly %>%
+  left_join(mktcap_lag, by = c("permno", "month"))
+
+#============================================================================
+#============================== CLEAN DATASET ===============================
+#============================================================================
+
+# Transform listing exchange codes explicit exchange names # 
+crsp_monthly <- crsp_monthly %>%
+  mutate(exchange = case_when(
+    exchcd %in% c(1, 31) ~ "NYSE",
+    exchcd %in% c(2, 32) ~ "AMEX",
+    exchcd %in% c(3, 33) ~ "NASDAQ",
+    TRUE ~ "Other"
+  ))
+
+# Transform industry codes to industry descriptions following BEM # 
+crsp_monthly <- crsp_monthly %>%
+  mutate(industry = case_when(
+    siccd >= 1 & siccd <= 999 ~ "Agriculture",
+    siccd >= 1000 & siccd <= 1499 ~ "Mining",
+    siccd >= 1500 & siccd <= 1799 ~ "Construction",
+    siccd >= 2000 & siccd <= 3999 ~ "Manufacturing",
+    siccd >= 4000 & siccd <= 4899 ~ "Transportation",
+    siccd >= 4900 & siccd <= 4999 ~ "Utilities",
+    siccd >= 5000 & siccd <= 5199 ~ "Wholesale",
+    siccd >= 5200 & siccd <= 5999 ~ "Retail",
+    siccd >= 6000 & siccd <= 6799 ~ "Finance",
+    siccd >= 7000 & siccd <= 8999 ~ "Services",
+    siccd >= 9000 & siccd <= 9999 ~ "Public",
+    TRUE ~ "Missing"
+  ))
+
+#============================================================================
+#======================== DOWNLOAD FF FACTOR DATA  ==========================
+#============================================================================
+library(frenchdata)
+
+# Compute excess returns by subtracting the monthly risk free rate 
+factors_ff_monthly <- download_french_data("Fama/French 5 Factors (2x3)")$subsets$data[[1]] %>%
+  transmute(
+    month = floor_date(ymd(paste0(date, "01")), "month"),
+    rf = as.numeric(RF) / 100,
+    mkt_excess = as.numeric(`Mkt-RF`) / 100,
+    smb = as.numeric(SMB) / 100,
+    hml = as.numeric(HML) / 100, 
+    rmw = as.numeric(RMW) / 100, 
+    cma = as.numeric(CMA) / 100
+  ) %>%
+  filter(month >= start_date & month <= end_date)
+
+#============================================================================
+#====================== RETURNS AND EXCESS RETURNS  =========================
+#============================================================================
+
+# Construct returns adjusted for delisting, and then drop delisting returns and codes # 
+crsp_monthly <- crsp_monthly %>%
+  mutate(ret_adj = case_when(
+    is.na(dlstcd) ~ ret,
+    !is.na(dlstcd) & !is.na(dlret) ~ dlret,
+    dlstcd %in% c(500, 520, 580, 584) |
+      (dlstcd >= 551 & dlstcd <= 574) ~ -0.30,
+    dlstcd == 100 ~ ret,
+    TRUE ~ -1
+  )) %>%
+  select(-c(dlret, dlstcd))
+
+# Computing excess returns by subtracting rf # 
+crsp_monthly <- crsp_monthly %>%
+  left_join(factors_ff_monthly %>% select(month, rf), by = "month") %>%
+  mutate(
+    ret_excess = ret_adj - rf,
+    ret_excess = pmax(ret_excess, -1)
+  ) %>%
+  select(-ret_adj, -rf)
+
+#============================================================================
+#============================================================================
+#============================================================================
+
+# CLEANING DATA # 
+crsp_monthly <- crsp_monthly %>%
+  na.omit(ret_excess, mktcap, mktcap_lag)
+
+#============================================================================
+#========================= IMPORT COMPUSTAT DATA  ===========================
+#============================================================================
+
+# Import annual firm-level information on North America companies # 
+# funda_db <- tbl(wrds, in_schema("comp", "funda"))
+
+# 1: Keep only industrial fundamental data (ignore financial services) # 
+# 2: Keep standard format (STD) # 
+# 3: Keep only USD stock data # 
+# 4: Keep only data in the desired time window of interest # 
+
+# Import Compustat data # 
+library(readxl)
+compustat = as.data.table(read_excel("Documents/Master/Master Thesis/Data_CRSP_Compustat/compustat.xlsx"))
+
+library(lubridate)
+library(dplyr)
+
+# CLEANiNG # 
+compustat <- compustat %>%
+  filter(
+    indfmt == "INDL" &
+      datafmt == "STD" &
+      consol == "C" &
+      datadate >= start_date & datadate <= end_date
+  ) %>%
+  select(
+    gvkey, # Firm identifier
+    datadate, # Date of the accounting data
+    seq, # Stockholders' equity
+    ceq, # Total common/ordinary equity
+    at, # Total assets
+    lt, # Total liabilities
+    txditc, # Deferred taxes and investment tax credit
+    txdb, # Deferred taxes
+    itcb, # Investment tax credit
+    pstkrv, # Preferred stock redemption value
+    pstkl, # Preferred stock liquidating value
+    pstk, # Preferred stock par value
+    rev, 
+    cogs, 
+    interest, 
+    expenses
+  ) %>%
+  collect()
+
+#============================================================================
+#========================= CALCULATE BOOK EQUITY  ===========================
+#============================================================================
+
+# BE computations # 
+compustat <- compustat %>%
+  mutate(
+    be = coalesce(seq, ceq + pstk, at - lt) +
+      coalesce(txditc, txdb + itcb, 0) -
+      coalesce(pstkrv, pstkl, pstk, 0),
+    be = if_else(be <= 0, as.numeric(NA), be)
+  )
+
+# Keep only the last available information for each firm-year group # 
+compustat <- compustat %>%
+  mutate(year = year(datadate)) %>%
+  group_by(gvkey, year) %>%
+  filter(datadate == max(datadate)) %>%
+  ungroup()
+
+#============================================================================
+#======================= CRSP AND COMPUSTAT MERGE ===========================
+#============================================================================
+
+# Import CRSP/Compustat merge table provided by CRSP # 
+ccmxpf_linktable_db <- tbl(wrds, in_schema("crsp", "ccmxpf_linktable"))
+
+# Keep only relevant and correct links # 
+library(tidyr) 
+
+ccmxpf_linktable <- ccmxpf_linktable_db %>%
+  filter(linktype %in% c("LU", "LC") &
+           linkprim %in% c("P", "C") &
+           usedflag == 1) %>%
+  select(permno = lpermno, gvkey, linkdt, linkenddt) %>%
+  collect() %>%
+  mutate(linkenddt = replace_na(linkenddt, Sys.Date()))
+# ccmxpf_linktable
+
+# Use the link to create a new table with a mapping between stock identifier, firm identifier, and month # 
+ccm_links <- crsp_monthly %>%
+  inner_join(ccmxpf_linktable, by = "permno") %>%
+  filter(!is.na(gvkey) & (date >= linkdt & date <= linkenddt)) %>%
+  select(permno, gvkey, date)
+
+# Add these links to the Compustat gvkey to our monthly stock return # 
+crsp_monthly <- crsp_monthly %>%
+  left_join(ccm_links, by = c("permno", "date"))
+
+#============================================================================
+#====================== FAMA AND FRENCH REPLICATION =========================
+#============================================================================
+
+library(tidyverse)
+library(RSQLite)
+library(lubridate)
+
+# Sorting the relevant data # 
+data_ff <- crsp_monthly %>%
+  left_join(factors_ff_monthly, by = "month") %>%
+  select(
+    permno, gvkey, month, ret_excess, mkt_excess,
+    mktcap, mktcap_lag, exchange
+  ) %>%
+  drop_na()
+
+# Retrieve BE # 
+be <- compustat %>%
+  select(gvkey, datadate, be) %>%
+  drop_na()
+
+#============================================================================
+#======================== Implement all time lags ===========================
+#============================================================================
+
+# Firm size = market capitalization recorded for June # 
+me_ff <- data_ff %>%
+  filter(month(month) == 6) %>%
+  mutate(sorting_date = month %m+% months(1)) %>%
+  select(permno, sorting_date, me_ff = mktcap)
+
+# ME for the end of year t - 1 # 
+me_ff_dec <- data_ff %>%
+  filter(month(month) == 12) %>%
+  mutate(sorting_date = ymd(paste0(year(month) + 1, "0701)"))) %>%
+  select(permno, gvkey, sorting_date, bm_me = mktcap)
+
+#============================================================================
+#========================= CALCULATE BM VARIABLE ============================
+#============================================================================
+
+# BE reported in year t - 1 (the datadate is within the last year) # 
+# Hence, the BM ratio can be based on accounting information that is up to 18 months old # 
+# BM calculation # 
+bm_ff <- be %>%
+  mutate(sorting_date = ymd(paste0(year(datadate) + 1, "0701"))) %>%
+  select(gvkey, sorting_date, bm_be = be) %>%
+  drop_na() %>%
+  inner_join(me_ff_dec, by = c("gvkey", "sorting_date")) %>%
+  mutate(bm_ff = bm_be / bm_me) %>%
+  select(permno, sorting_date, bm_ff)
+
+# Merge FF variables and ME (market cap recorded for June) # 
+variables_ff <- me_ff %>%
+  inner_join(bm_ff, by = c("permno", "sorting_date")) %>%
+  drop_na() %>%
+  distinct(permno, sorting_date, .keep_all = TRUE)
+
+#============================================================================
+#========================= CALCULATE OP VARIABLE ============================
+#============================================================================
+
+# Retrieve variables for OP calculations # 
+op <- compustat %>% 
+  select(gvkey, datadate, rev, cogs, expenses, interest, be) %>% 
+  mutate(op_ff = (rev-cogs-expenses-interest) / be) 
+
+op = as.data.table(op)
+op[, rev:=NULL]
+op[, cogs:=NULL]
+op[, interest:=NULL]
+op[, expenses:=NULL]
+op[, be:=NULL]
+
+# Merge OP and me_ff # 
+op_ff <- op %>% 
+  mutate(sorting_date = ymd(paste0(year(datadate) + 1, "0701"))) %>% 
+  select(gvkey, sorting_date, op_ff) %>% 
+  drop_na() %>% 
+  inner_join(me_ff_dec, by = c("gvkey", "sorting_date")) %>% 
+  select(permno, sorting_date, op_ff)
+
+# Merge FF variables and ME (market cap recorded for June) # 
+variables_ff_op <- me_ff %>% 
+  inner_join(op_ff, by = c("permno", "sorting_date")) %>% 
+  drop_na() %>% 
+  distinct(permno, sorting_date, .keep_all = TRUE)
+
+#============================================================================
+#======================== CALCULATE INV VARIABLE ============================
+#============================================================================
+
+# Retrieve variables for OP calculations # 
+n <- nrow(compustat$at)
+inv <- compustat %>% 
+  select(gvkey, datadate, at) %>% 
+  mutate(inv_ff = log(at) / log(lag(at))) 
+
+inv = as.data.table(inv)
+inv[, at:=NULL]
+
+# Merge INV and me_ff # 
+inv_ff <- inv %>% 
+  mutate(sorting_date = ymd(paste0(year(datadate) + 1, "0701"))) %>% 
+  select(gvkey, sorting_date, inv_ff) %>% 
+  drop_na() %>% 
+  inner_join(me_ff_dec, by = c("gvkey", "sorting_date")) %>% 
+  select(permno, sorting_date, inv_ff)
+
+# Merge FF variables and ME (market cap recorded for June) # 
+variables_ff_inv <- me_ff %>% 
+  inner_join(inv_ff, by = c("permno", "sorting_date")) %>% 
+  drop_na() %>% 
+  distinct(permno, sorting_date, .keep_all = TRUE)
+
+#============================================================================
+#============================ PORTFOLIO SORTS ===============================
+#============================================================================
+
+# Construct portfolio based on NYSE breakpoints # 
+# NYSE median breakpoints for the five portfolios in the size dimension # 
+# NYSE breakpoints for the five portfolios in the B/M (value) dimension # 
+
+assign_portfolio <- function(data, var, percentiles) {
+  breakpoints <- data %>%
+    filter(exchange == "NYSE") %>%
+    summarize(breakpoint = quantile(
+      {{ var }},
+      probs = {{ percentiles }},
+      na.rm = TRUE
+    )) %>%
+    pull(breakpoint) %>%
+    as.numeric()
+  
+  data %>%
+    mutate(portfolio = findInterval({{ var }}, breakpoints, all.inside = TRUE)) %>%
+    pull(portfolio)
+}
+
+portfolios_ff <- variables_ff %>%
+  inner_join(data_ff, by = c("permno" = "permno", "sorting_date" = "month")) %>%
+  group_by(sorting_date) %>%
+  mutate(
+    portfolio_me = assign_portfolio(
+      data = cur_data(),
+      var = me_ff,
+      percentiles = c(0, 0.2, 0.4, 0.6, 0.8, 1)
+    ),
+    portfolio_bm = assign_portfolio(
+      data = cur_data(),
+      var = bm_ff,
+      percentiles = c(0, 0.2, 0.4, 0.6, 0.8, 1)
+    )
+  ) %>%
+  select(permno, sorting_date, portfolio_me, portfolio_bm)
+
+# Merge the portfolios to the return data for the rest of the year # 
+portfolios_ff <- data_ff %>%
+  mutate(sorting_date = case_when(
+    month(month) <= 6 ~ ymd(paste0(year(month) - 1, "0701")),
+    month(month) >= 7 ~ ymd(paste0(year(month), "0701"))
+  )) %>%
+  inner_join(portfolios_ff, by = c("permno", "sorting_date"))
+
+# Identify portoflios # 
+portfolios_ff <- portfolios_ff %>% 
+  group_by(sorting_date, portfolio_me, portfolio_bm) %>% 
+  ungroup() %>% 
+  mutate(portfolio = paste0(portfolio_me, "", portfolio_bm))
+
+# Sort by portfolio: rememeber size on LHS and value on RHS # 
+setorder(portfolios_ff, portfolio)
+
+# Overview of portfolio average monthly stock returns # 
+portfolio_ret_BM <- portfolios_ff %>% 
+  select(month, ret_excess, portfolio, portfolio_ret) 
+
+# Compute average returns # 
+table_BM_5x5 <- portfolio_ret_BM %>%
+  group_by(portfolio) %>%
+  summarise_at(vars(ret_excess), list(name = mean))
+
+# Multiply with 100 # 
+table_BM_5x5$average_ret_BM = table_BM_5x5$name * 100
+  
+# Construct portfolio based on NYSE breakpoints # 
+# NYSE median breakpoints for the two portfolios in the size dimension # 
+# NYSE breakpoints for the three portfolios in the OP (profitability) dimension # 
+
+portfolios_ff_op <- variables_ff_op %>%
+  inner_join(data_ff, by = c("permno" = "permno", "sorting_date" = "month")) %>%
+  group_by(sorting_date) %>%
+  mutate(
+    portfolio_me = assign_portfolio(
+      data = cur_data(),
+      var = me_ff,
+      percentiles = c(0, 0.2, 0.4, 0.6, 0.8, 1)
+    ),
+    portfolio_op = assign_portfolio(
+      data = cur_data(),
+      var = op_ff,
+      percentiles = c(0, 0.2, 0.4, 0.6, 0.8, 1)
+    )
+  ) %>%
+  select(permno, sorting_date, portfolio_me, portfolio_op)
+
+portfolios_ff_op <- data_ff %>%
+  mutate(sorting_date = case_when(
+    month(month) <= 6 ~ ymd(paste0(year(month) - 1, "0701")),
+    month(month) >= 7 ~ ymd(paste0(year(month), "0701"))
+  )) %>%
+  inner_join(portfolios_ff_op, by = c("permno", "sorting_date"))
+
+# Identify portfolios # 
+portfolios_ff_op <- portfolios_ff_op %>% 
+  group_by(sorting_date, portfolio_me, portfolio_op) %>% 
+  ungroup() %>% 
+  mutate(portfolio = paste0(portfolio_me, "/", portfolio_op))
+
+# Sort by portfolio: rememeber size on LHS and value on RHS # 
+setorder(portfolios_ff_op, portfolio)
+
+# Overview of portfolio average monthly stock returns # 
+portfolio_ret_op <- portfolios_ff_op %>% 
+  select(month, ret_excess, portfolio) 
+
+# Compute average returns # 
+table_op_5x5 <- portfolio_ret_op %>%
+  group_by(portfolio) %>%
+  summarise_at(vars(ret_excess), list(name = mean))
+
+# Multiply with 100 # 
+table_op_5x5$average_ret_op = table_op_5x5$name * 100
+
+# Construct portfolio based on NYSE breakpoints # 
+# NYSE median breakpoints for the two portfolios in the size dimension # 
+# NYSE breakpoints for the three portfolios in the INV (investment) dimension # 
+
+portfolios_ff_inv <- variables_ff_inv %>%
+  inner_join(data_ff, by = c("permno" = "permno", "sorting_date" = "month")) %>%
+  group_by(sorting_date) %>%
+  mutate(
+    portfolio_me = assign_portfolio(
+      data = cur_data(),
+      var = me_ff,
+      percentiles = c(0, 0.2, 0.4, 0.6, 0.8, 1)
+    ),
+    portfolio_inv = assign_portfolio(
+      data = cur_data(),
+      var = inv_ff,
+      percentiles = c(0, 0.2, 0.4, 0.6, 0.8, 1)
+    )
+  ) %>%
+  select(permno, sorting_date, portfolio_me, portfolio_inv)
+
+portfolios_ff_inv <- data_ff %>%
+  mutate(sorting_date = case_when(
+    month(month) <= 6 ~ ymd(paste0(year(month) - 1, "0701")),
+    month(month) >= 7 ~ ymd(paste0(year(month), "0701"))
+  )) %>%
+  inner_join(portfolios_ff_inv, by = c("permno", "sorting_date"))
+
+# Identify portfolios # 
+portfolios_ff_inv <- portfolios_ff_inv %>% 
+  group_by(sorting_date, portfolio_me, portfolio_inv) %>% 
+  ungroup() %>% 
+  mutate(portfolio = paste0(portfolio_me, "/", portfolio_inv))
+
+# Sort by portfolio: rememeber size on LHS and value on RHS # 
+setorder(portfolios_ff_inv, portfolio)
+
+# Overview of portfolio average monthly stock returns # 
+portfolio_ret_inv <- portfolios_ff_inv %>% 
+  select(month, ret_excess, portfolio) 
+
+# Compute average returns # 
+table_inv_5x5 <- portfolio_ret_inv %>%
+  group_by(portfolio) %>%
+  summarise_at(vars(ret_excess), list(name = mean))
+
+# Multiply with 100 # 
+table_inv_5x5$average_ret_inv = table_inv_5x5$name * 100
+
