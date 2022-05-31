@@ -133,13 +133,15 @@ crsp_monthly <- crsp_monthly %>%
 library(frenchdata)
 
 # Compute excess returns by subtracting the monthly risk free rate 
-factors_ff_monthly <- download_french_data("Fama/French 3 Factors")$subsets$data[[1]] %>%
+factors_ff_monthly <- download_french_data("Fama/French 5 Factors (2x3)")$subsets$data[[1]] %>%
   transmute(
     month = floor_date(ymd(paste0(date, "01")), "month"),
     rf = as.numeric(RF) / 100,
     mkt_excess = as.numeric(`Mkt-RF`) / 100,
     smb = as.numeric(SMB) / 100,
-    hml = as.numeric(HML) / 100
+    hml = as.numeric(HML) / 100, 
+    rmw = as.numeric(RMW) / 100, 
+    cma = as.numeric(CMA) / 100
   ) %>%
   filter(month >= start_date & month <= end_date)
 
@@ -310,6 +312,10 @@ me_ff_dec <- data_ff %>%
   mutate(sorting_date = ymd(paste0(year(month) + 1, "0701)"))) %>%
   select(permno, gvkey, sorting_date, bm_me = mktcap)
 
+#============================================================================
+#========================= CALCULATE BM VARIABLE ============================
+#============================================================================
+
 # BE reported in year t - 1 (the datadate is within the last year) # 
 # Hence, the BM ratio can be based on accounting information that is up to 18 months old # 
 # BM calculation # 
@@ -325,6 +331,63 @@ bm_ff <- be %>%
 variables_ff <- me_ff %>%
   inner_join(bm_ff, by = c("permno", "sorting_date")) %>%
   drop_na() %>%
+  distinct(permno, sorting_date, .keep_all = TRUE)
+
+#============================================================================
+#========================= CALCULATE OP VARIABLE ============================
+#============================================================================
+
+# Retrieve variables for OP calculations # 
+op <- compustat %>% 
+  select(gvkey, datadate, rev, cogs, expenses, interest, be) %>% 
+  mutate(op_ff = (rev-cogs-expenses-interest) / be) 
+
+op = as.data.table(op)
+op[, rev:=NULL]
+op[, cogs:=NULL]
+op[, interest:=NULL]
+op[, expenses:=NULL]
+op[, be:=NULL]
+
+# Merge OP and me_ff # 
+op_ff <- op %>% 
+  mutate(sorting_date = ymd(paste0(year(datadate) + 1, "0701"))) %>% 
+  select(gvkey, sorting_date, op_ff) %>% 
+  drop_na() %>% 
+  inner_join(me_ff_dec, by = c("gvkey", "sorting_date")) %>% 
+  select(permno, sorting_date, op_ff)
+
+# Merge FF variables and ME (market cap recorded for June) # 
+variables_ff_op <- me_ff %>% 
+  inner_join(op_ff, by = c("permno", "sorting_date")) %>% 
+  drop_na() %>% 
+  distinct(permno, sorting_date, .keep_all = TRUE)
+
+#============================================================================
+#======================== CALCULATE INV VARIABLE ============================
+#============================================================================
+
+# Retrieve variables for OP calculations # 
+n <- nrow(compustat$at)
+inv <- compustat %>% 
+  select(gvkey, datadate, at) %>% 
+  mutate(inv_ff = log(at) / log(lag(at))) 
+
+inv = as.data.table(inv)
+inv[, at:=NULL]
+
+# Merge INV and me_ff # 
+inv_ff <- inv %>% 
+  mutate(sorting_date = ymd(paste0(year(datadate) + 1, "0701"))) %>% 
+  select(gvkey, sorting_date, inv_ff) %>% 
+  drop_na() %>% 
+  inner_join(me_ff_dec, by = c("gvkey", "sorting_date")) %>% 
+  select(permno, sorting_date, inv_ff)
+
+# Merge FF variables and ME (market cap recorded for June) # 
+variables_ff_inv <- me_ff %>% 
+  inner_join(inv_ff, by = c("permno", "sorting_date")) %>% 
+  drop_na() %>% 
   distinct(permno, sorting_date, .keep_all = TRUE)
 
 #============================================================================
@@ -376,12 +439,68 @@ portfolios_ff <- data_ff %>%
   )) %>%
   inner_join(portfolios_ff, by = c("permno", "sorting_date"))
 
+# Construct portfolio based on NYSE breakpoints # 
+# NYSE median breakpoints for the two portfolios in the size dimension # 
+# NYSE breakpoints for the three portfolios in the OP (profitability) dimension # 
+
+portfolios_ff_op <- variables_ff_op %>%
+  inner_join(data_ff, by = c("permno" = "permno", "sorting_date" = "month")) %>%
+  group_by(sorting_date) %>%
+  mutate(
+    portfolio_me = assign_portfolio(
+      data = cur_data(),
+      var = me_ff,
+      percentiles = c(0, 0.5, 1)
+    ),
+    portfolio_op = assign_portfolio(
+      data = cur_data(),
+      var = op_ff,
+      percentiles = c(0, 0.3, 0.7, 1)
+    )
+  ) %>%
+  select(permno, sorting_date, portfolio_me, portfolio_op)
+
+portfolios_ff_op <- data_ff %>%
+  mutate(sorting_date = case_when(
+    month(month) <= 6 ~ ymd(paste0(year(month) - 1, "0701")),
+    month(month) >= 7 ~ ymd(paste0(year(month), "0701"))
+  )) %>%
+  inner_join(portfolios_ff_op, by = c("permno", "sorting_date"))
+
+# Construct portfolio based on NYSE breakpoints # 
+# NYSE median breakpoints for the two portfolios in the size dimension # 
+# NYSE breakpoints for the three portfolios in the INV (investment) dimension # 
+
+portfolios_ff_inv <- variables_ff_inv %>%
+  inner_join(data_ff, by = c("permno" = "permno", "sorting_date" = "month")) %>%
+  group_by(sorting_date) %>%
+  mutate(
+    portfolio_me = assign_portfolio(
+      data = cur_data(),
+      var = me_ff,
+      percentiles = c(0, 0.5, 1)
+    ),
+    portfolio_inv = assign_portfolio(
+      data = cur_data(),
+      var = inv_ff,
+      percentiles = c(0, 0.3, 0.7, 1)
+    )
+  ) %>%
+  select(permno, sorting_date, portfolio_me, portfolio_inv)
+
+portfolios_ff_inv <- data_ff %>%
+  mutate(sorting_date = case_when(
+    month(month) <= 6 ~ ymd(paste0(year(month) - 1, "0701")),
+    month(month) >= 7 ~ ymd(paste0(year(month), "0701"))
+  )) %>%
+  inner_join(portfolios_ff_inv, by = c("permno", "sorting_date"))
+
 #============================================================================
 #==================== FAMA AND FRENCH FACTOR RETURNS  =======================
 #============================================================================
 
 # Computing the value-weighted average returns for each of the six portfolios # 
-# Forming the Fama and French factors # 
+# Forming the Fama and French factors: size formed on BM # 
 # (REPLICATED) # 
 
 factors_ff_monthly_replicated <- portfolios_ff %>%
@@ -394,27 +513,114 @@ factors_ff_monthly_replicated <- portfolios_ff %>%
   ) %>%
   group_by(month) %>%
   summarize(
-    smb_replicated = mean(ret[portfolio_me == 1]) - mean(ret[portfolio_me == 2]),
+    smb_bm_replicated = mean(ret[portfolio_me == 1]) - mean(ret[portfolio_me == 2]),
     hml_replicated = mean(ret[portfolio_bm == 3]) - mean(ret[portfolio_bm == 1])
   )
+
+# Computing the value-weighted average returns for each of the six portfolios # 
+# Forming the Fama and French factors: size formed on OP # 
+# (REPLICATED) # 
+
+factors_ff_monthly_replicated_op <- portfolios_ff_op %>%
+  mutate(portfolio = paste0(portfolio_me, portfolio_op)) %>%
+  group_by(portfolio, month) %>%
+  summarize(
+    ret = weighted.mean(ret_excess, mktcap_lag), .groups = "drop",
+    portfolio_me = unique(portfolio_me),
+    portfolio_op = unique(portfolio_op)
+  ) %>%
+  group_by(month) %>%
+  summarize(
+    smb_op_replicated = mean(ret[portfolio_me == 1]) - mean(ret[portfolio_me == 2]),
+    rmw_replicated = mean(ret[portfolio_op == 3]) - mean(ret[portfolio_op == 1])
+  )
+
+# Merge bm and op data # 
+factors_ff_monthly_replicated <- factors_ff_monthly_replicated_op %>% 
+  inner_join(factors_ff_monthly_replicated, by = c("month"))
+
+# Computing the value-weighted average returns for each of the six portfolios # 
+# Forming the Fama and French factors: size formed on INV # 
+# (REPLICATED) # 
+
+factors_ff_monthly_replicated_inv <- portfolios_ff_inv %>%
+  mutate(portfolio = paste0(portfolio_me, portfolio_inv)) %>%
+  group_by(portfolio, month) %>%
+  summarize(
+    ret = weighted.mean(ret_excess, mktcap_lag), .groups = "drop",
+    portfolio_me = unique(portfolio_me),
+    portfolio_inv = unique(portfolio_inv)
+  ) %>%
+  group_by(month) %>%
+  summarize(
+    smb_inv_replicated = mean(ret[portfolio_me == 1]) - mean(ret[portfolio_me == 2]),
+    cma_replicated = mean(ret[portfolio_inv == 3]) - mean(ret[portfolio_inv == 1])
+  )
+
+# Merge bm, op, and inv data # 
+factors_ff_monthly_replicated <- factors_ff_monthly_replicated_inv %>% 
+  inner_join(factors_ff_monthly_replicated, by = c("month"))
+
+# Calculate weighted SMB # 
+factors_ff_monthly_replicated <- factors_ff_monthly_replicated %>% 
+  mutate(smb_replicated = 1/3*(smb_bm_replicated + smb_op_replicated + smb_inv_replicated)) %>% 
+  select(month, smb_replicated, hml_replicated, rmw_replicated, cma_replicated)
 
 #============================================================================
 #======================== REPLICATION EVALUATION  ===========================
 #============================================================================
 
 # COMPARISON: FF VERSUS REPLICATION # 
-test <- factors_ff_monthly %>%
+rep_evaluation <- factors_ff_monthly %>%
   inner_join(factors_ff_monthly_replicated, by = "month") %>%
   mutate(
     smb_replicated = round(smb_replicated, 4),
-    hml_replicated = round(hml_replicated, 4)
+    hml_replicated = round(hml_replicated, 4), 
+    rmw_replicated = round(rmw_replicated, 4)
   )
 
 # Show regression table for SMB factor # 
-summary(lm(smb ~ smb_replicated, data = test)) 
+summary(lm(smb ~ smb_replicated, data = rep_evaluation)) 
 
+# Show regression table for HML factor # 
+summary(lm(hml ~ hml_replicated, data = rep_evaluation)) 
 
+# Show regression table for RMW factor # 
+summary(lm(rmw ~ rmw_replicated, data = rep_evaluation)) 
 
+# Show regression table for CMA factor # 
+summary(lm(cma ~ cma_replicated, data = rep_evaluation)) 
+
+#============================================================================
+#========================== REPLICATED FACTORS  =============================
+#============================================================================
+
+# CLEANING #
+five_factors_monthly <- rep_evaluation %>% 
+  mutate(mkt_excess = mkt_excess * 100, 
+         smb_replicated = smb_replicated * 100, 
+         hml_replicated = hml_replicated * 100, 
+         rmw_replicated = rmw_replicated * 100, 
+         cma_replicated = cma_replicated * 100) %>% 
+  select(month, mkt_excess, smb_replicated, hml_replicated, rmw_replicated, cma_replicated)
+
+# Computing factor means # 
+mkt_mean = mean(five_factors_monthly$mkt_excess)
+smb_mean = mean(five_factors_monthly$smb_replicated)
+hml_mean = mean(five_factors_monthly$hml_replicated)
+rmw_mean = mean(five_factors_monthly$rmw_replicated)
+cma_mean = mean(five_factors_monthly$cma_replicated)
+
+# Computing factor std dev # 
+mkt_std = sd(five_factors_monthly$mkt_excess)
+smb_std = sd(five_factors_monthly$smb_replicated)
+hml_std = sd(five_factors_monthly$hml_replicated)
+rmw_std = sd(five_factors_monthly$rmw_replicated)
+cma_std = sd(five_factors_monthly$cma_replicated)
+
+# Computing factor t-means # 
+five_factors_monthly <- five_factors_monthly %>% 
+  select(mkt_excess, smb_replicated, hml_replicated, rmw_replicated, cma_replicated)
 
 
 
