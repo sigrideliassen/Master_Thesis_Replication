@@ -1,0 +1,336 @@
+# Install packages needed to conduct the analysis
+# install.packages("data.table")
+# install.packages("zoo")
+# install.packages("dplyr")
+# install.packages("tidyr")
+# install.packages("openxlsx")
+# install.packages("rio")
+
+library(data.table)
+library(zoo)
+library(dplyr)
+library(tidyr)
+library(stringr)
+
+# Keep only data in the time windows of interest # 
+start_date = "1990-06-30"
+end_date = "2021-12-31"
+
+#============================================================================
+#========================== MKTCAP DATA =====================================
+#============================================================================
+
+# Market Capitalization 
+
+## 1st cleaning in Excel
+## Delete the Error columns in Excel before importing the set to R. 
+## This reduces the data set to 6814 and to 7157 in the extended period
+library(readxl)
+LSE_MV_Raw <- as.data.table(read_excel("Documents/Master/Master Thesis/Refinitiv/Ready for R - LSE/LSE_ME_Raw.xlsx"))
+LSE_MV_NP <- as.data.table(read_excel("Documents/Master/Master Thesis/Refinitiv/Ready for R - LSE/LSE_ME_NP.xlsx"))
+
+## Change layout of the Dataset using the tidyr package
+LSE_MV_Raw <- pivot_longer(LSE_MV_Raw, 2:6814, names_to = "ID", values_to = "MV")
+LSE_MV_NP <- pivot_longer(LSE_MV_NP, 2:7157, names_to = "ID", values_to = "MV")
+
+# Merge the data set with data for the extended period (1990 to 2021)
+MKTCAP_data = merge(LSE_MV_Raw, LSE_MV_NP, all = TRUE)
+
+## Assign names to the columns 
+colnames(MKTCAP_data) = c("DATE", "ID", "MV")
+
+## Delete the part of the security name to shorten the names (MV Code)
+MKTCAP_data$ID <- gsub("(MV)","",as.character(MKTCAP_data$ID))
+
+## Sort the findings based on the ID
+MKTCAP_data <- MKTCAP_data[order(MKTCAP_data$ID),]
+
+# Delete Errors, NA and 0 from the dataset
+MKTCAP_data = na.omit(MKTCAP_data)
+
+#============================================================================
+#============================= BE DATA ======================================
+#============================================================================
+
+# Book Value (Equity) defined as Common Equity 
+
+## 1st cleaning in Excel
+## Delete the Error columns in Excel before importing the set to R. 
+## This reduces the data set to 4802 and to 1779 in the extended period
+LSE_BE_Raw <- as.data.table(read_excel("Documents/Master/Master Thesis/Refinitiv/Ready for R - LSE/LSE_BE_Raw.xlsx"))
+LSE_BE_NP <- as.data.table(read_excel("Documents/Master/Master Thesis/Refinitiv/Ready for R - LSE/LSE_BE_NP.xlsx"))
+
+## Change layout of the Dataset using the tidyr package
+LSE_BE_Raw <- pivot_longer(LSE_BE_Raw, 2:4802, names_to = "ID", values_to = "BV")
+LSE_BE_NP <- pivot_longer(LSE_BE_NP, 2:1779, names_to = "ID", values_to = "BV")
+
+## Assign names to the columns 
+colnames(LSE_BE_Raw) = c("DATE", "ID", "BE")
+colnames(LSE_BE_NP) = c("DATE", "ID", "BE")
+
+# Merge the data set with data for the extended period (1990 to 2021)
+BE_data = merge(LSE_BE_Raw, LSE_BE_NP, all = TRUE)
+
+## Delete the part of the security name to shorten the names (BV Code)
+BE_data$ID <- gsub("(WC03501)","",as.character(BE_data$ID))
+### Not able to delete (). why?
+
+## Sort the findings based on the ID
+BE_data <- BE_data[order(BE_data$ID),]
+
+# Delete Errors, NA and 0 from the dataset
+BE_data = na.omit(BE_data)
+
+# Abs value of BE 
+BE_data$BE = abs(BE_data$BE)
+
+#============================================================================
+#====================== MERGE MKTCAP AND BE DATA ============================
+#============================================================================
+
+# Merge MV and BV data 
+data = merge(BE_data, MKTCAP_data, all = TRUE)
+data$DATE = as.Date(data$DATE)
+
+# Delete Errors, NA and 0 from the dataset
+data = na.omit(data)
+
+# Convert dataset to a Data Table
+data = as.data.table(data)
+
+# Sort by ID
+setkey(data,DATE,ID)
+vec=c('ID', 'DATE')
+setorderv(data,vec)
+
+#============================================================================
+#================================ OP DATA ===================================
+#============================================================================
+
+LSE_EBITDA <- as.data.table(read_excel("Documents/Master/Master Thesis/Refinitiv/Ready for R - LSE/LSE_EBITDA_Raw.xlsx"))
+LSE_IE <- as.data.table(read_excel("Documents/Master/Master Thesis/Refinitiv/Ready for R - LSE/LSE_IE_Raw.xlsx"))
+
+## Change layout of the Dataset using the tidyr package
+LSE_EBITDA <- pivot_longer(LSE_EBITDA, 2:4893, names_to = "ID", values_to = "EBITDA")
+LSE_IE <- pivot_longer(LSE_IE, 2:4980, names_to = "ID", values_to = "interest")
+
+## Delete the part of the security name to shorten the names (MV Code)
+LSE_EBITDA$ID <- gsub("(WC18198)","",as.character(LSE_EBITDA$ID))
+LSE_IE$ID <- gsub("(WC01251)","",as.character(LSE_IE$ID))
+
+# Merge the data set with data for the extended period (1990 to 2021)
+OP_data = merge(LSE_EBITDA, LSE_IE, all = TRUE)
+
+## Assign names to the columns 
+colnames(OP_data) = c("DATE", "ID", "EBITDA", "interest")
+
+## Delete the part of the security name to shorten the names (MV Code)
+OP_data$ID <- gsub("(WC03501)","",as.character(OP_data$ID))
+
+## Sort the findings based on the ID
+OP_data <- OP_data[order(OP_data$ID),]
+
+# Delete Errors, NA and 0 from the dataset
+OP_data = na.omit(OP_data)
+
+#============================================================================
+#=========================== MERGE OP INTO DATA =============================
+#============================================================================
+
+# Merge MV and BV data 
+data = merge(OP_data, data, all = TRUE)
+data$DATE = as.Date(data$DATE)
+
+# Delete Errors, NA and 0 from the dataset
+data = na.omit(data)
+
+# Convert dataset to a Data Table
+data = as.data.table(data)
+
+# Sort by ID
+setkey(data,DATE,ID)
+vec=c('ID', 'DATE')
+setorderv(data,vec)
+
+#============================================================================
+#=============================== INV DATA ===================================
+#============================================================================
+
+LSE_TA <- as.data.table(read_excel("Documents/Master/Master Thesis/Refinitiv/Ready for R - LSE/LSE_TA_Raw.xlsx"))
+
+## Change layout of the Dataset using the tidyr package
+LSE_TA <- pivot_longer(LSE_TA, 2:5010, names_to = "ID", values_to = "assets")
+
+## Delete the part of the security name to shorten the names (MV Code)
+LSE_TA$ID <- gsub("(WC02999)","",as.character(LSE_TA$ID))
+
+## Assign names to the columns 
+INV_data = copy(LSE_TA)
+colnames(INV_data) = c("DATE", "ID", "assets")
+
+## Sort the findings based on the ID
+INV_data <- INV_data[order(INV_data$ID),]
+
+# Delete Errors, NA and 0 from the dataset
+INV_data = na.omit(INV_data)
+
+#============================================================================
+#=========================== MERGE INV INTO DATA ============================
+#============================================================================
+
+# Merge MV and BV data 
+data = merge(INV_data, data, all = TRUE)
+data$DATE = as.Date(data$DATE)
+
+# Delete Errors, NA and 0 from the dataset
+data = na.omit(data)
+
+# Convert dataset to a Data Table
+data = as.data.table(data)
+
+# Sort by ID
+setkey(data,DATE,ID)
+vec=c('ID', 'DATE')
+setorderv(data,vec)
+
+#============================================================================
+#=========================== PRICE AND RET DATA =============================
+#============================================================================
+
+LSE_P <- as.data.table(read_excel("Documents/Master/Master Thesis/Refinitiv/Ready for R - LSE/LSE_P_Raw.xlsx"))
+
+## Change layout of the Dataset using the tidyr package
+LSE_P <- pivot_longer(LSE_P, 2:7461, names_to = "ID", values_to = "PRC")
+
+## Delete the part of the security name to shorten the names (MV Code)
+LSE_P$ID <- gsub("(P)","",as.character(LSE_P$ID))
+
+## Assign names to the columns 
+RET_data = copy(LSE_P)
+colnames(RET_data) = c("DATE", "ID", "PRC")
+
+## Sort the findings based on the ID
+RET_data <- RET_data[order(RET_data$ID),]
+
+# Delete Errors, NA and 0 from the dataset
+RET_data = na.omit(RET_data)
+
+#============================================================================
+#=========================== MERGE PRC INTO DATA ============================
+#============================================================================
+
+# Merge MV and BV data 
+data = merge(RET_data, data, all = TRUE)
+data$DATE = as.Date(data$DATE)
+
+# Delete Errors, NA and 0 from the dataset
+data = na.omit(data)
+
+# Convert dataset to a Data Table
+data = as.data.table(data)
+
+# Sort by ID
+setkey(data,DATE,ID)
+vec=c('ID', 'DATE')
+setorderv(data,vec)
+
+# CLEANING # 
+rm(LSE_BE_NP, LSE_BE_Raw, LSE_EBITDA, LSE_IE, LSE_MV_NP, LSE_MV_Raw, LSE_TA, LSE_P)
+
+#============================================================================
+#============================ COMPUTE RETURNS  ==============================
+#============================================================================
+
+data = data[, RET:= log(PRC) - log(lag(PRC)), by = ID]
+
+# Remove NA
+data = na.omit(data)
+
+#============================================================================
+#======================== DOWNLOAD FF FACTOR DATA  ==========================
+#============================================================================
+library(frenchdata)
+
+# Compute excess returns by subtracting the monthly risk free rate 
+factors_ff_monthly <- download_french_data("Fama/French 5 Factors (2x3)")$subsets$data[[1]] %>%
+  transmute(
+    month = floor_date(ymd(paste0(date, "01")), "month"),
+    rf = as.numeric(RF) / 100,
+    mkt_excess = as.numeric(`Mkt-RF`) / 100,
+    smb = as.numeric(SMB) / 100,
+    hml = as.numeric(HML) / 100, 
+    rmw = as.numeric(RMW) / 100, 
+    cma = as.numeric(CMA) / 100
+  ) %>%
+  filter(month >= start_date & month <= end_date)
+
+factors_ff_monthly = as.data.table(factors_ff_monthly)
+#============================================================================
+#========================== COMPUTE OP AND INV  =============================
+#============================================================================
+
+# PROFITABILITY(OP) # 
+data = data[, OP:= (EBITDA - interest)/BE]
+
+# INVESTMENT (INV) # 
+data[,INV:= log(assets) - log(lag(assets)), by = "ID"]
+
+#============================================================================
+#============================= MERGE RF RATE  ===============================
+#============================================================================
+
+# Merge RF data with data # 
+data[,year:=year(DATE)]
+data[,month:=month(DATE)]
+data[,key:=paste(year,month)]
+
+factors_ff_monthly[,year:=year(month)]
+factors_ff_monthly[,month:=month(month)]
+factors_ff_monthly[,key:=paste(year,month)]
+
+data <- data %>% 
+  left_join(factors_ff_monthly, by = c("key")) 
+  
+data <- data %>%
+  select(DATE, ID, BE, MV, RET, OP, INV, rf)
+
+# Copy INV values until next value appear # 
+library(naniar)
+data1 = copy(data)
+
+data1 %>% 
+  
+data1$INV = replace_with_na(data1, replace = list(data1$INV == 0))
+
+data1 = fill(data1, INV, .direction = c("down"))
+data1 = fill(data1, INV, .direction = c("up"))
+
+data1 = na.omit(data1)
+
+data = copy(data1)
+
+#============================================================================
+#============================= LAGGED MKTCAP  ===============================
+#============================================================================
+
+# Calculate one-month lagget market capitalization # 
+# Then use lagged market cap to compute VW portoflio returns #
+library(lubridate)
+library(dplyr)
+
+mktcap_lag <- data %>% 
+  mutate(date = DATE %m+% months(1)) %>% 
+  select(ID, month, mktcap_lag = MV)
+  
+
+
+
+
+
+
+
+
+
+
+# Construct excess returns so we from now on only work with excess returns # 
+data[, RET := RET - rf]
