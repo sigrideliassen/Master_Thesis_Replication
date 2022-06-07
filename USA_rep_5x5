@@ -309,7 +309,7 @@ me_ff <- data_ff %>%
 # ME for the end of year t - 1 # 
 me_ff_dec <- data_ff %>%
   filter(month(month) == 12) %>%
-  mutate(sorting_date = ymd(paste0(year(month) + 1, "0701)"))) %>%
+  mutate(sorting_date = ymd(paste0(year(month) + 1, "0701"))) %>%
   select(permno, gvkey, sorting_date, bm_me = mktcap)
 
 #============================================================================
