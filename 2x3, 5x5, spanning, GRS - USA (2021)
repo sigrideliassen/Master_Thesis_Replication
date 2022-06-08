@@ -370,7 +370,7 @@ variables_ff_op <- me_ff %>%
 n <- nrow(compustat$at)
 inv <- compustat %>% 
   select(gvkey, datadate, at) %>% 
-  mutate(inv_ff = log(at) / log(lag(at))) 
+  mutate(inv_ff = at / lag(at)) 
 
 inv = as.data.table(inv)
 inv[, at:=NULL]
@@ -938,18 +938,18 @@ library(GRS.test)
 #============================================================================
 
 # Three-factors 
-factor_mat_3 = five_factors_monthly[1:366,1:3]                  # Fama-French 3-factor model
-ret_mat_BM = factors_ff_monthly_replicated_5x5[1:366,2:25]      # 25 size-BM portfolio returns
+factor_mat_3 = five_factors_monthly[1:366,2:4]                  # Fama-French 3-factor model
+ret_mat_BM = factors_ff_monthly_replicated_5x5[1:366,2:26]      # 25 size-BM portfolio returns
 GRS_BM_3 = GRS.test(ret_mat_BM,factor_mat_3)$GRS.stat           # BM 3-factor 
 GRS_BM_3_p = GRS.test(ret_mat_BM,factor_mat_3)$GRS.pval         # BM 3-pvalue 
 
 # Five-factors 
-factor_mat_5 = five_factors_monthly[1:366,1:5]                  # Fama-French 5-factor model
+factor_mat_5 = five_factors_monthly[1:366,2:6]                  # Fama-French 5-factor model
 GRS_BM_5 = GRS.test(ret_mat_BM,factor_mat_5)$GRS.stat           # 25 size-BM portfolio returns
 GRS_BM_5_p = GRS.test(ret_mat_BM,factor_mat_5)$GRS.pval         # BM 5-pvalue 
 
 # Six-factors 
-factor_mat_6 = five_factors_monthly[1:366,1:6]                  # Fama-French 6-factor model
+factor_mat_6 = five_factors_monthly[1:366,2:7]                  # Fama-French 6-factor model
 GRS_BM_6 = GRS.test(ret_mat_BM,factor_mat_6)$GRS.stat           # 25 size-BM portfolio returns
 GRS_BM_6_p = GRS.test(ret_mat_BM,factor_mat_6)$GRS.pval         # BM 6-pvalue
 
@@ -958,7 +958,7 @@ GRS_BM_6_p = GRS.test(ret_mat_BM,factor_mat_6)$GRS.pval         # BM 6-pvalue
 #============================================================================
 
 # Three-factors 
-ret_mat_OP = factors_ff_monthly_replicated_op_5x5[1:366,2:25]   # 25 size-OP portfolio returns
+ret_mat_OP = factors_ff_monthly_replicated_op_5x5[1:366,2:26]   # 25 size-OP portfolio returns
 GRS_OP_3 = GRS.test(ret_mat_OP,factor_mat_3)$GRS.stat           # Fama-French 3-factor model
 GRS_OP_3_p = GRS.test(ret_mat_OP,factor_mat_3)$GRS.pval         # OP 3-pvalue 
 
@@ -975,7 +975,7 @@ GRS_OP_6_p = GRS.test(ret_mat_OP,factor_mat_6)$GRS.pval         # OP 6-pvalue
 #============================================================================
 
 # Three-factors 
-ret_mat_INV = factors_ff_monthly_replicated_inv_5x5[1:366,2:25] # 25 size-INV portfolio returns
+ret_mat_INV = factors_ff_monthly_replicated_inv_5x5[1:366,2:26] # 25 size-INV portfolio returns
 GRS_INV_3 = GRS.test(ret_mat_INV,factor_mat_3)$GRS.stat         # Fama-French 3-factor model
 GRS_INV_3_p = GRS.test(ret_mat_INV,factor_mat_3)$GRS.pval       # INV 3-pvalue 
 
@@ -986,4 +986,3 @@ GRS_INV_5_p = GRS.test(ret_mat_INV,factor_mat_5)$GRS.pval       # INV 5-pvalue
 # Six-factors 
 GRS_INV_6 = GRS.test(ret_mat_INV,factor_mat_6)$GRS.stat         # Fama-French 6-factor model
 GRS_INV_6_p = GRS.test(ret_mat_INV,factor_mat_6)$GRS.pval       # INV 6-pvalue 
-
