@@ -1,0 +1,130 @@
+RESULTS: 
+Call:
+lm(formula = mkt_replicated ~ hml_replicated + rmw_replicated + 
+    cma_replicated + wml_replicated, data = five_factors_monthly)
+
+Residuals:
+     Min       1Q   Median       3Q      Max 
+-13.0291  -2.1625   0.1622   2.3477  12.3534 
+
+Coefficients:
+               Estimate Std. Error t value Pr(>|t|)    
+(Intercept)     0.97530    0.20925   4.661 4.46e-06 ***
+hml_replicated  0.31386    0.08818   3.559 0.000422 ***
+rmw_replicated -0.53987    0.08444  -6.393 5.11e-10 ***
+cma_replicated  0.73605    0.13300   5.534 6.08e-08 ***
+wml_replicated  0.07863    0.03717   2.116 0.035080 *  
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+Residual standard error: 3.836 on 355 degrees of freedom
+Multiple R-squared:  0.2256,	Adjusted R-squared:  0.2169 
+F-statistic: 25.85 on 4 and 355 DF,  p-value: < 2.2e-16
+
+> 
+> # Run HML on the remaining five factors # 
+> hml_on_factors_exSMB <- lm(hml_replicated ~ mkt_replicated + rmw_replicated + cma_replicated + wml_replicated, data = five_factors_monthly)
+> summary(hml_on_factors_exSMB)
+
+Call:
+lm(formula = hml_replicated ~ mkt_replicated + rmw_replicated + 
+    cma_replicated + wml_replicated, data = five_factors_monthly)
+
+Residuals:
+     Min       1Q   Median       3Q      Max 
+-11.8053  -1.3117   0.1494   1.1575   7.6604 
+
+Coefficients:
+               Estimate Std. Error t value Pr(>|t|)    
+(Intercept)    -0.12330    0.12732  -0.968 0.333482    
+mkt_replicated  0.10979    0.03084   3.559 0.000422 ***
+rmw_replicated  0.27907    0.05062   5.513 6.79e-08 ***
+cma_replicated -0.89418    0.06685 -13.376  < 2e-16 ***
+wml_replicated -0.11752    0.02122  -5.537 5.99e-08 ***
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+Residual standard error: 2.269 on 355 degrees of freedom
+Multiple R-squared:  0.5215,	Adjusted R-squared:  0.5161 
+F-statistic: 96.71 on 4 and 355 DF,  p-value: < 2.2e-16
+
+> 
+> # Run RMW on the remaining five factors # 
+> rmw_on_factors_exSMB <- lm(rmw_replicated ~ mkt_replicated + hml_replicated + cma_replicated + wml_replicated, data = five_factors_monthly)
+> summary(rmw_on_factors_exSMB)
+
+Call:
+lm(formula = rmw_replicated ~ mkt_replicated + hml_replicated + 
+    cma_replicated + wml_replicated, data = five_factors_monthly)
+
+Residuals:
+    Min      1Q  Median      3Q     Max 
+-8.2823 -1.3150  0.0158  1.2777  7.5094 
+
+Coefficients:
+               Estimate Std. Error t value Pr(>|t|)    
+(Intercept)     0.58465    0.12449   4.696 3.79e-06 ***
+mkt_replicated -0.19125    0.02991  -6.393 5.11e-10 ***
+hml_replicated  0.28263    0.05126   5.513 6.79e-08 ***
+cma_replicated  0.17193    0.08200   2.097   0.0367 *  
+wml_replicated -0.10315    0.02158  -4.780 2.57e-06 ***
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+Residual standard error: 2.283 on 355 degrees of freedom
+Multiple R-squared:  0.329,	Adjusted R-squared:  0.3215 
+F-statistic: 43.52 on 4 and 355 DF,  p-value: < 2.2e-16
+
+> 
+> # Run CMA on the remaining five factors # 
+> cma_on_factors_exSMB <- lm(cma_replicated ~ mkt_replicated + hml_replicated + rmw_replicated + wml_replicated, data = five_factors_monthly)
+> summary(cma_on_factors_exSMB)
+
+Call:
+lm(formula = cma_replicated ~ mkt_replicated + hml_replicated + 
+    rmw_replicated + wml_replicated, data = five_factors_monthly)
+
+Residuals:
+    Min      1Q  Median      3Q     Max 
+-5.8707 -0.7174 -0.0015  0.8853  4.6925 
+
+Coefficients:
+                Estimate Std. Error t value Pr(>|t|)    
+(Intercept)    -0.240156   0.081543  -2.945  0.00344 ** 
+mkt_replicated  0.107908   0.019498   5.534 6.08e-08 ***
+hml_replicated -0.374754   0.028017 -13.376  < 2e-16 ***
+rmw_replicated  0.071151   0.033933   2.097  0.03672 *  
+wml_replicated  0.002555   0.014320   0.178  0.85852    
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+Residual standard error: 1.469 on 355 degrees of freedom
+Multiple R-squared:  0.443,	Adjusted R-squared:  0.4367 
+F-statistic: 70.57 on 4 and 355 DF,  p-value: < 2.2e-16
+
+> 
+> # Testing WML on only four factor (ex. SMB since redundant) # 
+> wml_on_factors_exSMB <- lm(wml_replicated ~ mkt_replicated + hml_replicated + rmw_replicated + cma_replicated, data = five_factors_monthly)
+> summary(wml_on_factors_exSMB)
+
+Call:
+lm(formula = wml_replicated ~ mkt_replicated + hml_replicated + 
+    rmw_replicated + cma_replicated, data = five_factors_monthly)
+
+Residuals:
+     Min       1Q   Median       3Q      Max 
+-26.9450  -3.3085  -0.0775   3.2415  19.7197 
+
+Coefficients:
+               Estimate Std. Error t value Pr(>|t|)    
+(Intercept)     0.99990    0.30124   3.319 0.000996 ***
+mkt_replicated  0.15834    0.07484   2.116 0.035080 *  
+hml_replicated -0.67650    0.12217  -5.537 5.99e-08 ***
+rmw_replicated -0.58632    0.12265  -4.780 2.57e-06 ***
+cma_replicated  0.03509    0.19669   0.178 0.858517    
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+Residual standard error: 5.444 on 355 degrees of freedom
+Multiple R-squared:  0.3018,	Adjusted R-squared:  0.294 
+F-statistic: 38.37 on 4 and 355 DF,  p-value: < 2.2e-16
