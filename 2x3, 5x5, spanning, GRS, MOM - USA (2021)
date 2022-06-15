@@ -15,8 +15,8 @@ wrds <- dbConnect(
   dbname = "wrds",
   port = 9737,
   sslmode = "require",
-  user = rstudioapi::askForPassword("User Account"),
-  password = rstudioapi::askForPassword("Password")
+  user = rstudioapi::askForPassword("User Account"), # sigridmse
+  password = rstudioapi::askForPassword("Password"). # BamseBonoCase123
 )
 
 #============================================================================
