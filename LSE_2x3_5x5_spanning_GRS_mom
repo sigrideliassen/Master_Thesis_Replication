@@ -1,0 +1,656 @@
+# Install packages needed to conduct the analysis
+# install.packages("data.table")
+# install.packages("zoo")
+# install.packages("dplyr")
+# install.packages("tidyr")
+# install.packages("openxlsx")
+# install.packages("rio")
+
+library(data.table)
+library(zoo)
+library(dplyr)
+library(tidyr)
+library(stringr)
+
+# Keep only data in the time windows of interest # 
+start_date = "1990-06-30"
+end_date = "2021-12-31"
+
+#============================================================================
+#========================== MKTCAP DATA =====================================
+#============================================================================
+
+# Market Capitalization 
+
+## 1st cleaning in Excel
+## Delete the Error columns in Excel before importing the set to R. 
+## This reduces the data set to 6814 and to 7157 in the extended period
+library(readxl)
+LSE_MV_Raw <- as.data.table(read_excel("Documents/Master/Master Thesis/Refinitiv/Ready for R - LSE/LSE_ME_Raw.xlsx"))
+LSE_MV_NP <- as.data.table(read_excel("Documents/Master/Master Thesis/Refinitiv/Ready for R - LSE/LSE_ME_NP.xlsx"))
+
+## Change layout of the Dataset using the tidyr package
+LSE_MV_Raw <- pivot_longer(LSE_MV_Raw, 2:6814, names_to = "ID", values_to = "MV")
+LSE_MV_NP <- pivot_longer(LSE_MV_NP, 2:7157, names_to = "ID", values_to = "MV")
+
+# Merge the data set with data for the extended period (1990 to 2021)
+MKTCAP_data = merge(LSE_MV_Raw, LSE_MV_NP, all = TRUE)
+
+## Assign names to the columns 
+colnames(MKTCAP_data) = c("DATE", "ID", "MV")
+
+## Delete the part of the security name to shorten the names (MV Code)
+MKTCAP_data$ID <- gsub("(MV)","",as.character(MKTCAP_data$ID))
+
+## Sort the findings based on the ID
+MKTCAP_data <- MKTCAP_data[order(MKTCAP_data$ID),]
+
+# Multiply with 1000 # 
+MKTCAP_data$MV = MKTCAP_data$MV * 1000 
+
+# Delete Errors, NA and 0 from the dataset
+MKTCAP_data = na.omit(MKTCAP_data)
+
+#============================================================================
+#============================= BE DATA ======================================
+#============================================================================
+
+# Book Value (Equity) defined as Common Equity 
+
+## 1st cleaning in Excel
+## Delete the Error columns in Excel before importing the set to R. 
+## This reduces the data set to 4802 and to 1779 in the extended period
+LSE_BE_Raw <- as.data.table(read_excel("Documents/Master/Master Thesis/Refinitiv/Ready for R - LSE/LSE_BE_Raw.xlsx"))
+LSE_BE_NP <- as.data.table(read_excel("Documents/Master/Master Thesis/Refinitiv/Ready for R - LSE/LSE_BE_NP.xlsx"))
+
+## Change layout of the Dataset using the tidyr package
+LSE_BE_Raw <- pivot_longer(LSE_BE_Raw, 2:4802, names_to = "ID", values_to = "BV")
+LSE_BE_NP <- pivot_longer(LSE_BE_NP, 2:1779, names_to = "ID", values_to = "BV")
+
+## Assign names to the columns 
+colnames(LSE_BE_Raw) = c("DATE", "ID", "BE")
+colnames(LSE_BE_NP) = c("DATE", "ID", "BE")
+
+# Merge the data set with data for the extended period (1990 to 2021)
+BE_data = merge(LSE_BE_Raw, LSE_BE_NP, all = TRUE)
+
+## Delete the part of the security name to shorten the names (BV Code)
+BE_data$ID <- gsub("(WC03501)","",as.character(BE_data$ID))
+### Not able to delete (). why?
+
+## Sort the findings based on the ID
+BE_data <- BE_data[order(BE_data$ID),]
+
+# Delete Errors, NA and 0 from the dataset
+BE_data = na.omit(BE_data)
+
+# Abs value of BE 
+BE_data$BE = abs(BE_data$BE)
+
+#============================================================================
+#====================== MERGE MKTCAP AND BE DATA ============================
+#============================================================================
+
+# Merge MV and BV data 
+data = merge(BE_data, MKTCAP_data, all = TRUE)
+data$DATE = as.Date(data$DATE)
+
+# Delete Errors, NA and 0 from the dataset
+data = na.omit(data)
+
+# Convert dataset to a Data Table
+data = as.data.table(data)
+
+# Sort by ID
+setkey(data,DATE,ID)
+vec=c('ID', 'DATE')
+setorderv(data,vec)
+
+#============================================================================
+#================================ OP DATA ===================================
+#============================================================================
+
+LSE_EBITDA <- as.data.table(read_excel("Documents/Master/Master Thesis/Refinitiv/Ready for R - LSE/LSE_EBITDA_Raw.xlsx"))
+LSE_IE <- as.data.table(read_excel("Documents/Master/Master Thesis/Refinitiv/Ready for R - LSE/LSE_IE_Raw.xlsx"))
+
+## Change layout of the Dataset using the tidyr package
+LSE_EBITDA <- pivot_longer(LSE_EBITDA, 2:4893, names_to = "ID", values_to = "EBITDA")
+LSE_IE <- pivot_longer(LSE_IE, 2:4980, names_to = "ID", values_to = "interest")
+
+## Delete the part of the security name to shorten the names (MV Code)
+LSE_EBITDA$ID <- gsub("(WC18198)","",as.character(LSE_EBITDA$ID))
+LSE_IE$ID <- gsub("(WC01251)","",as.character(LSE_IE$ID))
+
+# Merge the data set with data for the extended period (1990 to 2021)
+OP_data = merge(LSE_EBITDA, LSE_IE, all = TRUE)
+
+## Assign names to the columns 
+colnames(OP_data) = c("DATE", "ID", "EBITDA", "interest")
+
+## Delete the part of the security name to shorten the names (MV Code)
+OP_data$ID <- gsub("(WC03501)","",as.character(OP_data$ID))
+
+## Sort the findings based on the ID
+OP_data <- OP_data[order(OP_data$ID),]
+
+# Delete Errors, NA and 0 from the dataset
+OP_data = na.omit(OP_data)
+
+#============================================================================
+#=========================== MERGE OP INTO DATA =============================
+#============================================================================
+
+# Merge MV and BV data 
+data = merge(OP_data, data, all = TRUE)
+data$DATE = as.Date(data$DATE)
+
+# Delete Errors, NA and 0 from the dataset
+data = na.omit(data)
+
+# Convert dataset to a Data Table
+data = as.data.table(data)
+
+# Sort by ID
+setkey(data,DATE,ID)
+vec=c('ID', 'DATE')
+setorderv(data,vec)
+
+#============================================================================
+#=============================== INV DATA ===================================
+#============================================================================
+
+LSE_TA <- as.data.table(read_excel("Documents/Master/Master Thesis/Refinitiv/Ready for R - LSE/LSE_TA_Raw.xlsx"))
+
+## Change layout of the Dataset using the tidyr package
+LSE_TA <- pivot_longer(LSE_TA, 2:5010, names_to = "ID", values_to = "assets")
+
+## Delete the part of the security name to shorten the names (MV Code)
+LSE_TA$ID <- gsub("(WC02999)","",as.character(LSE_TA$ID))
+
+## Assign names to the columns 
+INV_data = copy(LSE_TA)
+colnames(INV_data) = c("DATE", "ID", "assets")
+
+## Sort the findings based on the ID
+INV_data <- INV_data[order(INV_data$ID),]
+
+# Delete Errors, NA and 0 from the dataset
+INV_data = na.omit(INV_data)
+
+#============================================================================
+#=========================== MERGE INV INTO DATA ============================
+#============================================================================
+
+# Merge MV and BV data 
+data = merge(INV_data, data, all = TRUE)
+data$DATE = as.Date(data$DATE)
+
+# Delete Errors, NA and 0 from the dataset
+data = na.omit(data)
+
+# Convert dataset to a Data Table
+data = as.data.table(data)
+
+# Sort by ID
+setkey(data,DATE,ID)
+vec=c('ID', 'DATE')
+setorderv(data,vec)
+
+#============================================================================
+#=========================== PRICE AND RET DATA =============================
+#============================================================================
+
+LSE_P <- as.data.table(read_excel("Documents/Master/Master Thesis/Refinitiv/Ready for R - LSE/LSE_P_Raw.xlsx"))
+
+## Change layout of the Dataset using the tidyr package
+LSE_P <- pivot_longer(LSE_P, 2:7461, names_to = "ID", values_to = "PRC")
+
+## Delete the part of the security name to shorten the names (MV Code)
+LSE_P$ID <- gsub("(P)","",as.character(LSE_P$ID))
+
+## Assign names to the columns 
+RET_data = copy(LSE_P)
+colnames(RET_data) = c("DATE", "ID", "PRC")
+
+## Sort the findings based on the ID
+RET_data <- RET_data[order(RET_data$ID),]
+
+# Delete Errors, NA and 0 from the dataset
+RET_data = na.omit(RET_data)
+
+#============================================================================
+#=========================== MERGE PRC INTO DATA ============================
+#============================================================================
+
+# Merge MV and BV data 
+data = merge(RET_data, data, all = TRUE)
+data$DATE = as.Date(data$DATE)
+
+# Delete Errors, NA and 0 from the dataset
+data = na.omit(data)
+
+# Convert dataset to a Data Table
+data = as.data.table(data)
+
+# Sort by ID
+setkey(data,DATE,ID)
+vec=c('ID', 'DATE')
+setorderv(data,vec)
+
+# CLEANING # 
+rm(LSE_BE_NP, LSE_BE_Raw, LSE_EBITDA, LSE_IE, LSE_MV_NP, LSE_MV_Raw, LSE_TA, LSE_P)
+
+#============================================================================
+#============================ COMPUTE RETURNS  ==============================
+#============================================================================
+
+data = data[, RET:= log(PRC) - log(lag(PRC)), by = ID]
+
+# Remove NA
+data = na.omit(data)
+
+#============================================================================
+#======================== DOWNLOAD FF FACTOR DATA  ==========================
+#============================================================================
+library(frenchdata)
+
+# Compute excess returns by subtracting the monthly risk free rate 
+factors_ff_monthly <- download_french_data("Fama/French 5 Factors (2x3)")$subsets$data[[1]] %>%
+  transmute(
+    month = floor_date(ymd(paste0(date, "01")), "month"),
+    rf = as.numeric(RF) / 100,
+    mkt_excess = as.numeric(`Mkt-RF`) / 100,
+    smb = as.numeric(SMB) / 100,
+    hml = as.numeric(HML) / 100, 
+    rmw = as.numeric(RMW) / 100, 
+    cma = as.numeric(CMA) / 100
+  ) %>%
+  filter(month >= start_date & month <= end_date)
+
+factors_ff_monthly = as.data.table(factors_ff_monthly)
+
+#============================================================================
+#============================= MERGE RF RATE  ===============================
+#============================================================================
+
+# Merge RF data with data # 
+data[,year:=year(DATE)]
+data[,month:=month(DATE)]
+data[,key:=paste(year,month)]
+
+factors_ff_monthly[,year:=year(month)]
+factors_ff_monthly[,month:=month(month)]
+factors_ff_monthly[,key:=paste(year,month)]
+
+data <- data %>% 
+  left_join(factors_ff_monthly, by = c("key")) 
+
+data <- data %>%
+  select(DATE, ID, BE, MV, RET, EBITDA, interest, assets, rf)
+
+# Calculate excess returns 
+data <- data %>% 
+  mutate(ret_excess = RET - rf)
+
+#============================================================================
+#======================== Implement all time lags ===========================
+#============================================================================
+
+# Firm size = market capitalization recorded for June # 
+me_ff <- data %>%
+  filter(month(DATE) == 6) %>%
+  mutate(sorting_date = DATE %m+% months(1)) %>%
+  select(ID, sorting_date, me_ff = MV)
+
+# ME for the end of year t - 1 # 
+me_ff_dec <- data %>%
+  filter(month(DATE) == 12) %>%
+  mutate(sorting_date = ymd(paste0(year(DATE) + 1, "0701)"))) %>%
+  select(ID, sorting_date, bm_me = MV)
+
+#============================================================================
+#========================= CALCULATE BM VARIABLE ============================
+#============================================================================
+
+# BE reported in year t - 1 (the datadate is within the last year) # 
+# Hence, the BM ratio can be based on accounting information that is up to 18 months old # 
+# BM calculation # 
+
+be <- data %>% 
+  select(DATE, ID, BE)
+
+# Retrieve yearly variables 
+be_year <- be %>% 
+  filter(month(DATE) == 5) %>% 
+  mutate(sorting_date = DATE %m+% months(1)) %>% 
+  select(ID, DATE, sorting_date, BE)
+
+bm_ff <- be_year %>%
+  mutate(sorting_date = ymd(paste0(year(DATE) + 1, "0701"))) %>%
+  select(ID, DATE, sorting_date, bm_be = BE) %>%
+  drop_na() %>%
+  inner_join(me_ff_dec, by = c("ID", "sorting_date")) %>%
+  mutate(bm_ff = bm_be / bm_me) %>%
+  select(ID, sorting_date, DATE, bm_ff)
+
+me_ff <- me_ff %>% 
+  mutate(sorting_date = ymd(paste0(year(sorting_date) + 1, "0701)"))) %>%
+  select(ID, sorting_date, me_ff)
+
+# Merge FF variables and ME (market cap recorded for June) # 
+variables_ff <- me_ff %>%
+  inner_join(bm_ff, by = c("ID", "sorting_date")) %>%
+  drop_na() %>%
+  distinct(ID, DATE, sorting_date, .keep_all = TRUE)
+
+#============================================================================
+#========================= CALCULATE OP VARIABLE ============================
+#============================================================================
+
+# Lag OP variables 
+op_var <- data %>%
+  select(ID, DATE, EBITDA, interest)
+
+# Merge with BE 
+op <- be %>% 
+  left_join(op_var, by = c("ID", "DATE"))
+
+# Retrieve yearly variables 
+op_year <- op %>% 
+  filter(month(DATE) == 5) %>% 
+  mutate(sorting_date = DATE %m+% months(1)) %>% 
+  select(ID, DATE, sorting_date, EBITDA, interest, BE)
+
+# Lag variables 
+op_year = op_year[, EBITDA:=lag(EBITDA), by = "ID"]
+op_year = op_year[, interest:=lag(interest), by = "ID"]
+op_year = op_year[, BE:=lag(BE), by = "ID"]
+
+# Retrieve variables for OP calculations # 
+op_ff <- op_year %>% 
+  select(ID, DATE, sorting_date, EBITDA, interest, BE) %>% 
+  mutate(op_ff = (EBITDA-interest) / BE) %>% 
+  select(-c(EBITDA, interest, BE)) %>% 
+  drop_na()
+
+# Lag OP variables 
+op_ff <- op_ff %>%
+  mutate(sorting_date = ymd(paste0(year(sorting_date) + 1, "0701)"))) %>%
+  select(ID, DATE, sorting_date, op_ff)
+
+# Merge OP and me_ff # 
+# Merge FF variables and ME (market cap recorded for June) # 
+variables_ff_op <- me_ff %>% 
+  inner_join(op_ff, by = c("ID", "sorting_date")) %>% 
+  drop_na() %>% 
+  distinct(ID, DATE, sorting_date, .keep_all = TRUE)
+
+#============================================================================
+#======================== CALCULATE INV VARIABLE ============================
+#============================================================================
+
+# Retrieve variables for INV calculations # 
+inv <- data %>% 
+  select(ID, DATE, assets) 
+
+inv = as.data.table(inv)
+
+# Retrieve yearly variables 
+inv_year <- inv %>% 
+  filter(month(DATE) == 5) %>% 
+  mutate(sorting_date = DATE %m+% months(1)) %>% 
+  select(ID, DATE, sorting_date, assets)
+
+# Lag assets 
+inv_year = inv_year[, at_lag:= lag(assets), by = "ID"]
+inv_year = inv_year[, at_lag_2:=lag(assets, 2), by = "ID"]
+
+# Calculate inv 
+inv_year <- inv_year %>% 
+  mutate(inv_ff = (at_lag_2 - at_lag) / at_lag_2) %>% 
+  select(-c(assets, at_lag, at_lag_2)) %>% 
+  drop_na()
+
+# Consistent dates 
+inv_ff <- inv_year %>% 
+  mutate(sorting_date = ymd(paste0(year(sorting_date), "0701"))) %>% 
+  select(ID, DATE, sorting_date, inv_ff) %>% 
+  drop_na() %>% 
+  select(ID, DATE, sorting_date, inv_ff)
+
+# Merge INV and me_ff # 
+# Merge FF variables and ME (market cap recorded for June) # 
+variables_ff_inv <- me_ff %>% 
+  inner_join(inv_ff, by = c("ID", "sorting_date")) %>% 
+  drop_na() %>% 
+  distinct(ID, DATE, sorting_date, .keep_all = TRUE)
+
+#============================================================================
+#========================== CALCULATE MOM VARIABLE ==========================
+#============================================================================
+library(tidyverse)
+library(Hmisc)
+library(roll)
+
+# Lag MV 
+data2 = copy(data)
+data2 = data2[, mktcap_lag:= lag(MV), by = "ID"]
+
+# Lag prior-return (cumulative) # 
+mom <- data2 %>% 
+  group_by(ID) %>% 
+  arrange(DATE, .by_group = T) %>% 
+  mutate(
+    ret_cum_0_10 = roll_prod(1+RET, width = 11)-1, 
+    mom_ff = dplyr::lag(ret_cum_0_10, n = 2)
+  ) %>% 
+  select(-c(BE, EBITDA, interest, assets, RET, ret_excess, rf, MV))
+
+mom_ff <- mom %>%
+  mutate(sorting_date = ymd(paste0(year(DATE) + 1, "0701)"))) %>%
+  select(ID, DATE, sorting_date, mom_ff, mktcap_lag)
+
+# Merge INV and me_ff # 
+# Merge FF variables and ME (market cap recorded for June) # 
+variables_ff_mom <- mom_ff 
+
+setnames(variables_ff_mom, "mktcap_lag", "me_ff_month")
+
+#============================================================================
+#============================================================================
+#=========================  FACTOR CONSTRUCTION =============================
+#============================================================================
+#============================================================================
+
+#============================================================================
+#================================= BM 2x3 ===================================
+#============================================================================
+
+# Construct portfolio based on breakpoints # 
+# Median breakpoints for the two portfolios in the size dimension # 
+# Breakpoints for the three portfolios in the B/M (value) dimension # 
+
+assign_portfolio_lse <- function(data_lse, var, percentiles) {
+  breakpoints <- data_lse %>%
+    summarize(breakpoint = quantile(
+      {{ var }},
+      probs = {{ percentiles }},
+      na.rm = TRUE
+    )) %>%
+    pull(breakpoint) %>%
+    as.numeric()
+  
+  data_lse %>%
+    mutate(portfolio = findInterval({{ var }}, sort(breakpoints), all.inside = TRUE)) %>%
+    pull(portfolio)
+}
+
+portfolios_ff <- variables_ff %>%
+  inner_join(data, by = c("ID" = "ID", "DATE" = "DATE")) %>%
+  group_by(DATE) %>%
+  mutate(
+    portfolio_me = assign_portfolio_lse(
+      data_lse = cur_data(),
+      var = me_ff,
+      percentiles = c(0, 0.5, 1)
+    ),
+    portfolio_bm = assign_portfolio_lse(
+      data_lse = cur_data(),
+      var = bm_ff,
+      percentiles = c(0, 0.3, 0.7, 1)
+    )
+  ) %>%
+  select(ID, DATE, portfolio_me, portfolio_bm)
+
+# Merge the portfolios to the return data for the rest of the year # 
+portfolios_ff <- data %>%
+  inner_join(portfolios_ff, by = c("ID", "DATE")) 
+
+portfolios_ff <- portfolios_ff %>% 
+  select(ID, DATE, ret_excess, MV, portfolio_me, portfolio_bm)
+
+# Merge the portfolios to the return data for the rest of the year # 
+portfolios_ff <- data %>%
+  mutate(sorting_date = case_when(
+    month(DATE) <= 6 ~ ymd(paste0(year(DATE) - 1, "0701")),
+    month(DATE) >= 7 ~ ymd(paste0(year(DATE), "0701"))
+  )) %>%
+  inner_join(portfolios_ff, by = c("ID", "DATE"))
+
+
+
+
+
+
+
+
+
+
+
+
+
+#============================================================================
+#================================= OP 2x3 ===================================
+#============================================================================
+
+# Construct portfolio based on breakpoints # 
+# Median breakpoints for the two portfolios in the size dimension # 
+# Breakpoints for the three portfolios in the OP (value) dimension # 
+
+portfolios_ff_op <- variables_ff_op %>%
+  inner_join(data, by = c("ID" = "ID", "DATE" = "DATE")) %>%
+  group_by(DATE) %>%
+  mutate(
+    portfolio_me = assign_portfolio_lse(
+      data_lse = cur_data(),
+      var = me_ff,
+      percentiles = c(0, 0.5, 1)
+    ),
+    portfolio_op = assign_portfolio_lse(
+      data_lse = cur_data(),
+      var = op_ff,
+      percentiles = c(0, 0.3, 0.7, 1)
+    )
+  ) %>%
+  select(ID, DATE, portfolio_me, portfolio_op)
+
+# Merge the portfolios to the return data for the rest of the year # 
+portfolios_ff_op <- data %>%
+  inner_join(portfolios_ff_op, by = c("ID", "DATE")) 
+
+portfolios_ff_op <- portfolios_ff_op %>% 
+  select(ID, DATE, MV, ret_excess, portfolio_me, portfolio_op)
+
+#============================================================================
+#================================ INV 2x3 ===================================
+#============================================================================
+
+# Construct portfolio based on breakpoints # 
+# Median breakpoints for the two portfolios in the size dimension # 
+# Breakpoints for the three portfolios in the INV (value) dimension # 
+
+portfolios_ff_inv <- variables_ff_inv %>%
+  inner_join(data, by = c("ID" = "ID", "DATE" = "DATE")) %>%
+  group_by(DATE) %>%
+  mutate(
+    portfolio_me = assign_portfolio_lse(
+      data_lse = cur_data(),
+      var = me_ff,
+      percentiles = c(0, 0.5, 1)
+    ),
+    portfolio_inv = assign_portfolio_lse(
+      data_lse = cur_data(),
+      var = inv_ff,
+      percentiles = c(0, 0.3, 0.7, 1)
+    )
+  ) %>%
+  select(ID, DATE, portfolio_me, portfolio_inv)
+
+# Merge the portfolios to the return data for the rest of the year # 
+portfolios_ff_inv <- data %>%
+  inner_join(portfolios_ff_inv, by = c("ID", "DATE")) 
+
+portfolios_ff_inv <- portfolios_ff_inv %>% 
+  select(ID, DATE, MV, ret_excess, portfolio_me, portfolio_inv)
+
+#============================================================================
+#================================ MOM 2x3 ===================================
+#============================================================================
+
+# Construct portfolio based on breakpoints # 
+# Median breakpoints for the two portfolios in the size dimension # 
+# Breakpoints for the three portfolios in the MOM (value) dimension # 
+
+portfolios_ff_mom <- variables_ff_mom %>%
+  inner_join(data, by = c("ID" = "ID", "DATE" = "DATE")) %>%
+  group_by(DATE) %>%
+  mutate(
+    portfolio_me = assign_portfolio_lse(
+      data_lse = cur_data(),
+      var = me_ff_month,
+      percentiles = c(0, 0.5, 1)
+    ),
+    portfolio_mom = assign_portfolio_lse(
+      data_lse = cur_data(),
+      var = mom_ff,
+      percentiles = c(0, 0.3, 0.7, 1)
+    )
+  ) %>%
+  select(ID, DATE, portfolio_me, portfolio_mom)
+
+# Merge the portfolios to the return data for the rest of the year # 
+portfolios_ff_mom <- data2 %>%
+  inner_join(portfolios_ff_mom, by = c("ID", "DATE")) 
+
+portfolios_ff_mom <- portfolios_ff_mom %>% 
+  select(ID, DATE, MV, ret_excess, portfolio_me, portfolio_mom) %>% 
+  drop_na()
+
+#============================================================================
+#==================== FAMA AND FRENCH FACTOR RETURNS  =======================
+#============================================================================
+
+#============================================================================
+#============================ SMB AND HML FACTOR ============================
+#============================================================================
+
+# Computing the value-weighted average returns for each of the six portfolios # 
+# Forming the Fama and French factors: size formed on BM # 
+# (REPLICATED) # 
+
+factors_monthly <- portfolios_ff %>%
+  mutate(portfolio = paste0(portfolio_me, portfolio_bm)) %>%
+  group_by(portfolio, DATE) %>%
+  summarize(
+    ret = weighted.mean(ret_excess, MV), .groups = "drop",
+    portfolio_me = unique(portfolio_me),
+    portfolio_bm = unique(portfolio_bm)
+  ) %>%
+  group_by(DATE) %>%
+  summarize(
+    smb_bm_replicated = mean(ret[portfolio_me == 1]) - mean(ret[portfolio_me == 2]),
+    hml_replicated = mean(ret[portfolio_bm == 3]) - mean(ret[portfolio_bm == 1])
+  )
+
+
+
